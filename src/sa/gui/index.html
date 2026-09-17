@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Synthetic Aperture Tilt-Shift</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #15171a; --panel: #1d2024; --line: #2c3036; --text: #e4e6ea; --dim: #8b919a;
+    --accent: #5fb4ff; --ok: #5fd38a; --bad: #ff7a6b;
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: grid;
+         grid-template-columns: 330px 1fr; overflow: hidden; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 14px; }
+  h1 { font-size: 14px; margin: 0 0 12px; letter-spacing: .02em; }
+  section { border-top: 1px solid var(--line); padding: 12px 0; }
+  section.off { opacity: .4; pointer-events: none; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 8px;
+       display: flex; justify-content: space-between; }
+  h2 span { text-transform: none; letter-spacing: 0; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .dim { color: var(--dim); }
+  button, input[type=text], input[type=number], select {
+    font: inherit; color: var(--text); background: #262a30; border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 10px; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #08111a; border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  input[type=number] { width: 64px; } input[type=text] { width: 100%; }
+  .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+  .row > label { flex: 0 0 66px; color: var(--dim); }
+  .row input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+  .row output { flex: 0 0 58px; text-align: right; font-variant-numeric: tabular-nums; }
+  .path { word-break: break-all; color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .hint { color: var(--dim); font-size: 12px; margin: 6px 0 0; }
+  main { display: grid; grid-template-rows: auto 1fr 150px; min-width: 0; min-height: 0; }
+  #bar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  #bar .spacer { flex: 1; } #readout { color: var(--dim); font-variant-numeric: tabular-nums; }
+  #stage { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center;
+           background: #0d0e10; overflow: hidden; }
+  #wrap { position: relative; line-height: 0; }
+  #wrap img { max-width: 100%; max-height: calc(100vh - 200px); display: block; }
+  #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+  #empty { color: var(--dim); text-align: center; line-height: 1.6; }
+  #busy { position: absolute; top: 10px; right: 12px; background: #000a; padding: 3px 9px; border-radius: 10px;
+          font-size: 12px; display: none; }
+  #log { margin: 0; padding: 8px 12px; overflow-y: auto; border-top: 1px solid var(--line); background: #101214;
+         font: 11.5px/1.5 ui-monospace, Menlo, monospace; color: #aeb4bd; white-space: pre-wrap; }
+  #renders a { display: block; color: var(--accent); text-decoration: none; padding: 2px 0; cursor: pointer;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+<aside>
+  <h1>Synthetic Aperture Tilt-Shift</h1>
+
+  <section id="sec-project" style="border-top:0; padding-top:0">
+    <h2>Project</h2>
+    <div class="row">
+      <button id="pick-video">Choose video…</button>
+      <button id="pick-folder">Open project…</button>
+    </div>
+    <div class="row"><input type="text" id="path" placeholder="…or paste a path and press Enter"></div>
+    <div class="path" id="project-path">No project open.</div>
+  </section>
+
+  <section id="sec-ingest" class="off">
+    <h2>1 · Extract frames <span id="st-ingest"></span></h2>
+    <div class="row">
+      <label>every</label><input type="number" id="every" value="8" min="1" max="60">
+      <span class="dim">th frame</span><span style="flex:1"></span>
+      <button id="run-ingest">Extract</button>
+    </div>
+  </section>
+
+  <section id="sec-pose" class="off">
+    <h2>2 · Camera pose <span id="st-pose"></span></h2>
+    <div class="row"><span class="dim" id="pose-info" style="flex:1">COLMAP sparse reconstruction, CPU.</span>
+      <button id="run-pose">Solve</button></div>
+  </section>
+
+  <section id="sec-plane" class="off">
+    <h2>3 · Focus plane <span id="st-plane"></span></h2>
+    <div class="row">
+      <button id="mode-focus" class="on" title="Click the image: focus at that point's depth and pivot the tilt there">Click to focus</button>
+      <button id="mode-three" title="Click three scene points; the plane through them becomes the focus plane">Click 3 points</button>
+    </div>
+    <div class="row"><label>tilt</label><input type="range" id="tilt" min="0" max="85" step="0.5" value="0"><output id="o-tilt"></output></div>
+    <div class="row"><label>azimuth</label><input type="range" id="azimuth" min="0" max="360" step="1" value="0"><output id="o-azimuth"></output></div>
+    <div class="row"><label>distance</label><input type="range" id="dist" min="0" max="1000" step="1" value="500"><output id="o-dist"></output></div>
+    <div class="row"><label>aperture</label><input type="range" id="aperture" min="0.1" max="1" step="0.05" value="1"><output id="o-aperture"></output></div>
+    <div class="row">
+      <button id="reset-pivot">Pivot → centre</button><span style="flex:1"></span>
+      <button id="save-plane" class="primary">Save plane</button>
+    </div>
+    <p class="hint">Tilt 0° is an ordinary lens. Azimuth 0° tips the plane back like the ground. Distance is in COLMAP units.</p>
+  </section>
+
+  <section id="sec-render" class="off">
+    <h2>4 · Render <span id="st-render"></span></h2>
+    <div class="row">
+      <label>scale</label>
+      <select id="scale"><option value="1">full</option><option value="0.5">½</option><option value="0.25">¼</option></select>
+      <label style="flex:0 0 auto"><input type="checkbox" id="median"> median</label>
+      <span style="flex:1"></span><button id="run-render" class="primary">Render</button>
+    </div>
+    <div class="row">
+      <label>tilt sweep</label>
+      <input type="number" id="sw0" value="0"><input type="number" id="sw1" value="60"><input type="number" id="sw2" value="10">
+      <span style="flex:1"></span><button id="run-sweep">Sweep</button>
+    </div>
+    <div id="renders"></div>
+  </section>
+</aside>
+
+<main>
+  <div id="bar">
+    <button id="v-ref" class="on">Reference</button>
+    <button id="v-preview">Preview</button>
+    <button id="v-render">Render</button>
+    <label class="dim"><input type="checkbox" id="overlay" checked> depth points</label>
+    <span class="spacer"></span>
+    <span id="readout"></span>
+    <button id="cancel" style="display:none">Cancel job</button>
+  </div>
+  <div id="stage">
+    <div id="empty">Choose a phone video to start.<br><span class="dim">No footage yet? Run <code>sa demo</code> and open the <code>demo</code> folder.</span></div>
+    <div id="wrap" style="display:none"><img id="img" alt=""><canvas id="cv"></canvas></div>
+    <div id="busy"></div>
+  </div>
+  <pre id="log"></pre>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = async (url, body) => {
+  const r = await fetch(url, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.statusText); }
+  return r.json();
+};
+
+let S = null;                 // server state
+let pts = null;               // {uv, z} sparse points in the reference view
+let view = 'ref';             // ref | preview | render
+let mode = 'focus';           // focus | three
+let clicks = [];              // pixels collected in three-point mode
+let pivot = null;             // [u, v] full-res pixel, or null for the image centre
+let renderName = null;
+let logNext = 0, wasRunning = false, previewBusy = false, previewDirty = false, loadedFor = null;
+
+const say = msg => { $('log').textContent += msg + '\n'; $('log').scrollTop = 1e9; };
+const busy = msg => { $('busy').style.display = msg ? 'block' : 'none'; $('busy').textContent = msg || ''; };
+
+// --- plane parameters -------------------------------------------------------
+const distRange = () => { const d = S.poses.depths || [0.5, 1, 2]; return [d[0] / 2, d[2] * 2]; };
+const getDist = () => { const [lo, hi] = distRange(); return lo * Math.pow(hi / lo, $('dist').value / 1000); };
+const setDist = v => { const [lo, hi] = distRange(); $('dist').value = Math.max(0, Math.min(1000, 1000 * Math.log(v / lo) / Math.log(hi / lo))); };
+const params = () => ({tilt: +$('tilt').value, azimuth: +$('azimuth').value, dist: getDist(), pivot, aperture: +$('aperture').value});
+
+function showParams() {
+  const p = params();
+  $('o-tilt').textContent = p.tilt.toFixed(1) + '°';
+  $('o-azimuth').textContent = p.azimuth.toFixed(0) + '°';
+  $('o-dist').textContent = p.dist.toPrecision(3);
+  $('o-aperture').textContent = Math.round(p.aperture * 100) + '%';
+}
+
+// Plane n·X = d in the reference camera, exactly as geometry.plane_from_tilt builds it.
+function planeOf(p) {
+  const P = S.poses, t = p.tilt * Math.PI / 180, a = p.azimuth * Math.PI / 180;
+  const n = [Math.sin(t) * Math.sin(a), Math.sin(t) * Math.cos(a), Math.cos(t)];
+  const [u, v] = p.pivot || [P.cx, P.cy];
+  const ray = [(u - P.cx) / P.f, (v - P.cy) / P.f, 1];
+  return {n, d: p.dist * (n[0] * ray[0] + n[1] * ray[1] + n[2])};
+}
+// Predicted blur diameter, px at full resolution: b = D f |1/z − 1/z0|.
+function blurAt(u, v, z, pl, aperture) {
+  const P = S.poses, nr = pl.n[0] * (u - P.cx) / P.f + pl.n[1] * (v - P.cy) / P.f + pl.n[2];
+  return P.D * aperture * P.f * Math.abs(1 / z - nr / pl.d);
+}
+
+// --- drawing ----------------------------------------------------------------
+function draw() {
+  const cv = $('cv'), img = $('img');
+  if (!S || !S.poses || !img.clientWidth) return;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = img.clientWidth * dpr; cv.height = img.clientHeight * dpr;
+  const ctx = cv.getContext('2d'), k = cv.width / S.poses.width, p = params(), pl = planeOf(p);
+  if ($('overlay').checked && pts && view !== 'render') {
+    for (let i = 0; i < pts.uv.length; i++) {
+      const [u, v] = pts.uv[i], b = blurAt(u, v, pts.z[i], pl, p.aperture);
+      const s = Math.min(b / 12, 1);  // 0 = in focus
+      ctx.fillStyle = b < 2 ? 'rgba(95,255,140,.95)' : `rgba(255,${Math.round(190 - 130 * s)},80,${.55 - .3 * s})`;
+      const r = (b < 2 ? 2.2 : 1.4) * dpr;
+      ctx.fillRect(u * k - r / 2, v * k - r / 2, r, r);
+    }
+  }
+  ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = '#fff'; ctx.fillStyle = '#fff'; ctx.font = `${12 * dpr}px sans-serif`;
+  const [pu, pv] = pivot || [S.poses.cx, S.poses.cy];
+  if (view !== 'render') {
+    ctx.beginPath(); ctx.arc(pu * k, pv * k, 7 * dpr, 0, 7); ctx.moveTo(pu * k - 12 * dpr, pv * k); ctx.lineTo(pu * k + 12 * dpr, pv * k);
+    ctx.moveTo(pu * k, pv * k - 12 * dpr); ctx.lineTo(pu * k, pv * k + 12 * dpr); ctx.stroke();
+  }
+  clicks.forEach(([u, v], i) => { ctx.beginPath(); ctx.arc(u * k, v * k, 6 * dpr, 0, 7); ctx.stroke(); ctx.fillText(i + 1, u * k + 9 * dpr, v * k - 7 * dpr); });
+}
+
+function setView(v) {
+  view = v;
+  for (const name of ['ref', 'preview', 'render']) $('v-' + name).classList.toggle('on', name === v);
+  if (v === 'ref') $('img').src = '/api/ref.jpg?' + loadedFor;
+  if (v === 'preview') requestPreview();
+  if (v === 'render' && renderName) $('img').src = '/api/render/' + encodeURI(renderName) + '?' + Date.now();
+  draw();
+}
+
+async function requestPreview() {
+  if (!S || !S.poses) return;
+  if (previewBusy) { previewDirty = true; return; }
+  previewBusy = true; busy('rendering preview…');
+  const p = params(), q = new URLSearchParams({tilt: p.tilt, azimuth: p.azimuth, dist: p.dist, aperture: p.aperture});
+  if (p.pivot) { q.set('pu', p.pivot[0]); q.set('pv', p.pivot[1]); }
+  try {
+    const r = await fetch('/api/preview.jpg?' + q);
+    if (!r.ok) throw new Error((await r.json()).detail);
+    const url = URL.createObjectURL(await r.blob());
+    if (view === 'preview') { const old = $('img').src; $('img').src = url; if (old.startsWith('blob:')) URL.revokeObjectURL(old); }
+  } catch (e) { say('preview: ' + e.message); }
+  previewBusy = false; busy('');
+  if (previewDirty) { previewDirty = false; requestPreview(); }
+}
+
+function changed() { showParams(); draw(); if (view !== 'preview') setView('preview'); else requestPreview(); }
+
+// --- state ------------------------------------------------------------------
+function apply(state) {
+  S = state;
+  const has = !!S.project, frames = S.frames || 0, posed = !!S.poses, running = !!(S.job && S.job.running);
+  $('project-path').textContent = has ? S.project : 'No project open.';
+  $('sec-ingest').classList.toggle('off', !has || !S.video);
+  $('sec-pose').classList.toggle('off', !frames);
+  $('sec-plane').classList.toggle('off', !posed);
+  $('sec-render').classList.toggle('off', !posed);
+  $('st-ingest').innerHTML = frames ? `<span class="ok">${frames} frames</span>` : '';
+  $('st-pose').innerHTML = posed ? `<span class="${S.poses.registered < .8 * frames ? 'bad' : 'ok'}">${S.poses.registered}/${frames} registered</span>` : '';
+  $('st-plane').innerHTML = S.plane ? `<span class="ok">saved · ${S.plane.tilt.toFixed(0)}° @ ${S.plane.dist.toPrecision(3)}</span>` : '';
+  if (posed) $('pose-info').textContent = `f = ${S.poses.f.toFixed(0)} px · sweep D = ${S.poses.D.toPrecision(3)} · scene depth ≈ ${S.poses.depths ? S.poses.depths[1].toPrecision(3) : '?'}`;
+  for (const id of ['run-ingest', 'run-pose', 'run-render', 'run-sweep']) $(id).disabled = running;
+  $('run-render').disabled = $('run-sweep').disabled = running || !S.plane;
+  $('cancel').style.display = running ? '' : 'none';
+  $('renders').innerHTML = '';
+  (S.renders || []).slice(0, 12).forEach(name => {
+    const a = document.createElement('a'); a.textContent = name;
+    a.onclick = () => { renderName = name; setView('render'); };
+    $('renders').appendChild(a);
+  });
+  $('empty').style.display = posed ? 'none' : '';
+  $('wrap').style.display = posed ? '' : 'none';
+  if (!posed) $('empty').innerHTML = !has ? $('empty').innerHTML : frames ? 'Frames extracted. Solve the camera pose next.' : 'Extract frames to begin.';
+
+  const key = posed ? S.project + '|' + S.poses.ref + '|' + S.poses.registered + '|' + S.poses.f : null;
+  if (key && key !== loadedFor) loadScene(key);
+  if (!key) { loadedFor = null; pts = null; }
+}
+
+async function loadScene(key) {
+  loadedFor = key; pivot = null; clicks = [];
+  busy('loading frames…');
+  const ticker = setInterval(async () => { const s = await api('/api/state'); busy(`loading frames… ${s.loading[0]}/${s.loading[1]}`); }, 700);
+  try {
+    pts = await api('/api/points');
+    if (S.plane) { $('tilt').value = S.plane.tilt; $('azimuth').value = S.plane.azimuth; setDist(S.plane.dist); }
+    else setDist(S.poses.depths ? S.poses.depths[1] : 1);
+    showParams();
+    await new Promise(done => { $('img').onload = done; $('img').onerror = done; setView('ref'); });
+  } catch (e) { say('error: ' + e.message); }
+  clearInterval(ticker); busy(''); $('img').onload = draw; draw();
+}
+
+const refresh = async () => apply(await api('/api/state'));
+
+async function poll() {
+  try {
+    const l = await api('/api/log?since=' + logNext);
+    l.lines.forEach(say); logNext = l.next;
+    if (l.running !== wasRunning) {
+      const finished = wasRunning && !l.running; wasRunning = l.running;
+      await refresh();
+      if (finished && S.job && S.job.name === 'render' && S.job.returncode === 0 && S.renders.length) {
+        renderName = S.renders.find(n => n.endsWith('strip.png') && S.renders.indexOf(n) < 2) || S.renders[0];
+        setView('render');
+      }
+    }
+  } catch (e) { /* server restarting */ }
+  setTimeout(poll, wasRunning ? 500 : 1500);
+}
+
+async function run(body) {
+  try { await api('/api/run', body); logNext = 0; $('log').textContent = ''; wasRunning = false; await refresh(); }
+  catch (e) { say('error: ' + e.message); }
+}
+
+// --- events -----------------------------------------------------------------
+$('pick-video').onclick = async () => { const s = await api('/api/browse/video', {}); if (s.project) apply(s); };
+$('pick-folder').onclick = async () => { const s = await api('/api/browse/folder', {}); if (s.project) apply(s); };
+$('path').onkeydown = async e => { if (e.key !== 'Enter') return; try { apply(await api('/api/open', {path: e.target.value.trim()})); } catch (err) { say('error: ' + err.message); } };
+$('run-ingest').onclick = () => run({stage: 'ingest', every: +$('every').value});
+$('run-pose').onclick = () => run({stage: 'pose'});
+const renderBody = () => ({stage: 'render', scale: +$('scale').value, aperture: +$('aperture').value, median: $('median').checked});
+$('run-render').onclick = () => run(renderBody());
+$('run-sweep').onclick = () => run({...renderBody(), sweep: [+$('sw0').value, +$('sw1').value, +$('sw2').value], name: 'sweep'});
+$('cancel').onclick = () => api('/api/cancel', {});
+for (const id of ['tilt', 'azimuth', 'dist', 'aperture']) $(id).oninput = changed;
+$('overlay').onchange = draw;
+$('v-ref').onclick = () => setView('ref'); $('v-preview').onclick = () => setView('preview'); $('v-render').onclick = () => setView('render');
+$('reset-pivot').onclick = () => { pivot = null; changed(); };
+$('mode-focus').onclick = () => { mode = 'focus'; clicks = []; $('mode-focus').classList.add('on'); $('mode-three').classList.remove('on'); draw(); };
+$('mode-three').onclick = () => { mode = 'three'; clicks = []; $('mode-three').classList.add('on'); $('mode-focus').classList.remove('on'); setView('ref'); };
+$('save-plane').onclick = async () => {
+  try { const p = params(); await api('/api/plane', {tilt: p.tilt, azimuth: p.azimuth, dist: p.dist, pivot: p.pivot, save: true}); say('plane saved'); await refresh(); }
+  catch (e) { say('error: ' + e.message); }
+};
+
+const toPixel = e => { const r = $('cv').getBoundingClientRect(); return [(e.clientX - r.left) / r.width * S.poses.width, (e.clientY - r.top) / r.height * S.poses.height]; };
+
+$('cv').onclick = async e => {
+  if (!S || !S.poses || view === 'render') return;
+  const px = toPixel(e);
+  try {
+    if (mode === 'focus') {
+      const {dist} = await api('/api/depth', {pivot: px});
+      pivot = px; setDist(dist); changed();
+    } else {
+      clicks.push(px); draw();
+      if (clicks.length === 3) {
+        const pl = await api('/api/plane', {pixels: clicks, save: false});
+        clicks = []; pivot = null;
+        $('tilt').value = pl.tilt; $('azimuth').value = pl.azimuth; setDist(pl.dist);
+        say(`plane through 3 points: tilt ${pl.tilt.toFixed(1)}°, azimuth ${pl.azimuth.toFixed(0)}°, distance ${pl.dist.toPrecision(3)}`);
+        changed();
+      }
+    }
+  } catch (err) { say('error: ' + err.message); if (mode === 'three') { clicks.pop(); draw(); } }
+};
+
+$('cv').onmousemove = e => {
+  if (!pts || view === 'render') { $('readout').textContent = ''; return; }
+  const [u, v] = toPixel(e), reach = (14 * S.poses.width / $('cv').clientWidth) ** 2;
+  let best = -1, bd = reach;
+  for (let i = 0; i < pts.uv.length; i++) { const d = (pts.uv[i][0] - u) ** 2 + (pts.uv[i][1] - v) ** 2; if (d < bd) { bd = d; best = i; } }
+  if (best < 0) { $('readout').textContent = ''; return; }
+  const p = params(), b = blurAt(pts.uv[best][0], pts.uv[best][1], pts.z[best], planeOf(p), p.aperture);
+  $('readout').textContent = `depth ${pts.z[best].toPrecision(3)} · predicted blur ${b.toFixed(1)} px`;
+};
+window.onresize = draw;
+
+refresh().then(poll);
+</script>
+</body>
+</html>

@@ -17,6 +17,15 @@ decisions the project note left open and the build plan.
   (iPhone HDR video) the HLG curve is used instead so averaging is still done
   in linear light. Shooting with HDR off is still the better option.
 
+- **COLMAP is re-tuned for small baselines.** A hand sweep subtends only a
+  degree or two at the scene. With default thresholds (`init_min_tri_angle`
+  16°, triangulation/filter angle 1.5°) the mapper finds no initial pair; see
+  `pose._small_baseline_options`. Focal length is weakly constrained in this
+  regime, so it is seeded at 0.75 × width (iPhone 1× video) rather than
+  COLMAP's 1.2. An error in f barely affects renders of *picked* planes — the
+  reconstruction stays self-consistent — but it does skew numeric tilt angles.
+- **HDR:** the local ffmpeg has no `zscale`, so HLG is not tone-mapped.
+
 ## Conventions
 
 COLMAP poses are world-to-camera: `X_cam = R X_world + t`.
@@ -42,7 +51,7 @@ rendering at reduced scale for previews.
 
 **Numeric plane:** `tilt` (degrees off fronto-parallel), `azimuth` (direction
 of the tilt; 0 = plane recedes toward the top of the image, like the ground),
-`dist` (depth along the ray through the pivot pixel, default image centre).
+`dist` (z-depth of the plane at the pivot pixel, default image centre).
 `n = (sin τ sin φ, sin τ cos φ, cos τ)`, `d = n · (dist · ray_pivot)`.
 
 **Aperture:** `--aperture a` (0–1] keeps only frames whose centre lies within
