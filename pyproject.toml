@@ -1,0 +1,29 @@
+[project]
+name = "sa"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Daniel Kuo", email = "48892016+danielhkuo@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.141.1",
+    "numpy>=2.5.3",
+    "opencv-python>=5.0.0.93",
+    "pycolmap>=4.2.0",
+    "uvicorn>=0.53.0",
+]
+
+[project.scripts]
+sa = "sa:main"
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]
