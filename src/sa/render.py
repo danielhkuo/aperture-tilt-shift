@@ -99,3 +99,91 @@ def render_planes(
         if progress:
             progress(j + 1, len(indices))
     return [color.from_linear(a / np.maximum(wt, 1e-6)[..., None], transfer) for a, wt in zip(acc, weight)]
+
+
+# --- project level ---
+
+
+def exposure_outliers(project, names: Sequence[str], threshold: float = 4.0) -> set[str]:
+    """Frames whose mean brightness is a robust outlier (auto-exposure drift → banding)."""
+    import json
+
+    cache_path = project.root / "exposure.json"
+    cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+    missing = [n for n in names if n not in cache]
+    if missing:
+        means = _prefetch(
+            lambda n: float(cv2.imread(str(project.frames_dir / n), cv2.IMREAD_REDUCED_GRAYSCALE_8).mean()), missing
+        )
+        cache.update(zip(missing, means))
+        cache_path.write_text(json.dumps(cache))
+    v = np.array([cache[n] for n in names])
+    mad = np.median(np.abs(v - np.median(v)))
+    sigma = max(1.4826 * mad, 0.5)  # floor: never reject on sub-code-value wobble
+    return {n for n, x in zip(names, v) if abs(x - np.median(v)) > threshold * sigma}
+
+
+def select_frames(project, poses: Poses, *, aperture: float = 1.0, max_frames: int | None = None,
+                  keep_outliers: bool = False, log=print) -> list[int]:
+    idx = list(range(len(poses.names)))
+    centres = poses.centres()
+    if aperture < 1.0:
+        off = g.in_plane_offsets(centres, poses.R[poses.ref], centres[poses.ref])
+        radius = aperture * g.sweep_diameter(centres, poses.R[poses.ref]) / 2
+        idx = [i for i in idx if np.linalg.norm(off[i]) <= radius]
+    if not keep_outliers:
+        bad = exposure_outliers(project, [poses.names[i] for i in idx])
+        if bad:
+            log(f"dropping {len(bad)} exposure outliers: {', '.join(sorted(bad))}")
+            idx = [i for i in idx if poses.names[i] not in bad or i == poses.ref]
+    if max_frames and len(idx) > max_frames:
+        idx = [idx[j] for j in np.linspace(0, len(idx) - 1, max_frames).round().astype(int)]
+    return idx
+
+
+def frame_loader(project, poses: Poses, scale: float = 1.0) -> Loader:
+    def load(i: int) -> np.ndarray:
+        img = cv2.imread(str(project.frames_dir / poses.names[i]), cv2.IMREAD_COLOR)
+        if img is None:
+            raise FileNotFoundError(project.frames_dir / poses.names[i])
+        if scale != 1.0:
+            size = (round(img.shape[1] * scale), round(img.shape[0] * scale))
+            img = cv2.resize(img, size, interpolation=cv2.INTER_AREA)
+        return img
+
+    return load
+
+
+def render_project(project, poses: Poses, planes: Sequence[g.Plane], outputs: Sequence, *, scale: float = 1.0,
+                   aperture: float = 1.0, median: bool = False, max_frames: int | None = None,
+                   keep_outliers: bool = False, log=print) -> None:
+    """Render ``planes`` to ``outputs`` and record every parameter in run.json."""
+    idx = select_frames(project, poses, aperture=aperture, max_frames=max_frames, keep_outliers=keep_outliers, log=log)
+    log(f"rendering {len(planes)} plane(s) from {len(idx)} frames at scale {scale:g}")
+    step = max(len(idx) // 10, 1)
+    images = render_planes(
+        frame_loader(project, poses, scale), poses, planes, indices=idx, transfer=project.transfer(), median=median,
+        progress=lambda j, n: log(f"  {j}/{n}") if j % step == 0 or j == n else None,
+    )
+    centres = poses.centres()[idx]
+    for plane, img, out in zip(planes, images, outputs):
+        out.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(out), img)
+        tilt, azimuth, dist = g.tilt_from_plane(poses.K, plane)
+        project.log_run("render", out=str(out), n=plane.n.tolist(), d=plane.d, tilt=tilt, azimuth=azimuth, dist=dist,
+                        frames=len(idx), sweep_diameter=g.sweep_diameter(centres, poses.R[poses.ref]),
+                        focal_px=float(poses.K[0, 0]), aperture=aperture, scale=scale, median=median,
+                        transfer=project.transfer(), ref=poses.names[poses.ref])
+        log(f"→ {out}")
+
+
+def contact_strip(paths: Sequence, labels: Sequence[str], out, panel_width: int = 640) -> None:
+    """Side-by-side strip of renders — the tilt-sweep figure."""
+    panels = []
+    for path, label in zip(paths, labels):
+        img = cv2.imread(str(path))
+        img = cv2.resize(img, (panel_width, round(img.shape[0] * panel_width / img.shape[1])), interpolation=cv2.INTER_AREA)
+        cv2.putText(img, label, (16, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5, cv2.LINE_AA)
+        cv2.putText(img, label, (16, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
+        panels.append(img)
+    cv2.imwrite(str(out), np.hstack(panels))
