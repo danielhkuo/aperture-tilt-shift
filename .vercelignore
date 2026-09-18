@@ -1,9 +1,9 @@
-*
-!web/
-!web/**
+.venv/
+.git/
+demo/
 web/dist/
-!src/
-!src/sa/
-!src/sa/gui/
-!src/sa/gui/index.html
-!vercel.json
+tests/
+**/__pycache__/
+*.mp4
+*.MOV
+*.mov
