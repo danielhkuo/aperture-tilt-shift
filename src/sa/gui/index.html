@@ -7,7 +7,7 @@
 <style>
   :root {
     --bg: #15171a; --panel: #1d2024; --line: #2c3036; --text: #e4e6ea; --dim: #8b919a;
-    --accent: #5fb4ff; --ok: #5fd38a; --bad: #ff7a6b;
+    --accent: #5fb4ff; --ok: #5fd38a; --bad: #ff7a6b; --warn: #ffc66b;
     font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
@@ -17,10 +17,11 @@
   h1 { font-size: 14px; margin: 0 0 12px; letter-spacing: .02em; }
   section { border-top: 1px solid var(--line); padding: 12px 0; }
   section.off { opacity: .4; pointer-events: none; }
+  section.hidden { display: none; }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 8px;
        display: flex; justify-content: space-between; }
   h2 span { text-transform: none; letter-spacing: 0; }
-  .ok { color: var(--ok); } .bad { color: var(--bad); } .dim { color: var(--dim); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .dim { color: var(--dim); } .warn { color: var(--warn); }
   button, input[type=text], input[type=number], select {
     font: inherit; color: var(--text); background: #262a30; border: 1px solid var(--line); border-radius: 6px;
     padding: 5px 10px; }
@@ -35,26 +36,44 @@
   .row output { flex: 0 0 58px; text-align: right; font-variant-numeric: tabular-nums; }
   .path { word-break: break-all; color: var(--dim); font-size: 12px; margin-top: 6px; }
   .hint { color: var(--dim); font-size: 12px; margin: 6px 0 0; }
-  main { display: grid; grid-template-rows: auto 1fr 150px; min-width: 0; min-height: 0; }
+  code { background: #0d0e10; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  pre.cmd { background: #0d0e10; padding: 8px 10px; border-radius: 6px; font-size: 11.5px; overflow-x: auto;
+            margin: 6px 0; user-select: all; }
+  main { display: grid; grid-template-rows: auto auto 1fr 150px; min-width: 0; min-height: 0; }
+  #conn { padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 12px; display: flex; gap: 10px;
+          align-items: center; }
+  #conn button { padding: 2px 8px; font-size: 12px; }
   #bar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
   #bar .spacer { flex: 1; } #readout { color: var(--dim); font-variant-numeric: tabular-nums; }
   #stage { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center;
            background: #0d0e10; overflow: hidden; }
   #wrap { position: relative; line-height: 0; }
-  #wrap img { max-width: 100%; max-height: calc(100vh - 200px); display: block; }
+  #wrap img { max-width: 100%; max-height: calc(100vh - 240px); display: block; }
   #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
-  #empty { color: var(--dim); text-align: center; line-height: 1.6; }
+  #empty { color: var(--dim); text-align: center; line-height: 1.7; max-width: 520px; padding: 20px; }
   #busy { position: absolute; top: 10px; right: 12px; background: #000a; padding: 3px 9px; border-radius: 10px;
           font-size: 12px; display: none; }
   #log { margin: 0; padding: 8px 12px; overflow-y: auto; border-top: 1px solid var(--line); background: #101214;
          font: 11.5px/1.5 ui-monospace, Menlo, monospace; color: #aeb4bd; white-space: pre-wrap; }
   #renders a { display: block; color: var(--accent); text-decoration: none; padding: 2px 0; cursor: pointer;
                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; grid-template-rows: 1fr auto; overflow: auto; }
+    aside { border-right: 0; border-top: 1px solid var(--line); order: 2; }
+    main { grid-template-rows: auto auto minmax(240px, 55vh) 110px; }
+    #wrap img { max-height: 50vh; }
+  }
 </style>
 </head>
 <body>
 <aside>
   <h1>Synthetic Aperture Tilt-Shift</h1>
+
+  <section id="sec-scene" style="border-top:0; padding-top:0">
+    <h2>Scene</h2>
+    <div class="row"><select id="scene" style="flex:1"></select></div>
+    <p class="hint">Pre-solved captures rendered right here in WebGL. Drag the sliders.</p>
+  </section>
 
   <section id="sec-project" style="border-top:0; padding-top:0">
     <h2>Project</h2>
@@ -95,15 +114,17 @@
       <button id="reset-pivot">Pivot → centre</button><span style="flex:1"></span>
       <button id="save-plane" class="primary">Save plane</button>
     </div>
-    <p class="hint">Tilt 0° is an ordinary lens. Azimuth 0° tips the plane back like the ground. Distance is in COLMAP units.</p>
+    <p class="hint">Tilt 0° is an ordinary lens. Azimuth 0° tips the plane back like the ground. Distance is in reconstruction units.</p>
   </section>
 
   <section id="sec-render" class="off">
     <h2>4 · Render <span id="st-render"></span></h2>
     <div class="row">
+      <span id="row-scale" style="display:contents">
       <label>scale</label>
       <select id="scale"><option value="1">full</option><option value="0.5">½</option><option value="0.25">¼</option></select>
       <label style="flex:0 0 auto"><input type="checkbox" id="median"> median</label>
+      </span>
       <span style="flex:1"></span><button id="run-render" class="primary">Render</button>
     </div>
     <div class="row">
@@ -113,9 +134,18 @@
     </div>
     <div id="renders"></div>
   </section>
+
+  <section id="sec-install">
+    <h2>Run it on your own video</h2>
+    <p class="hint" style="margin-top:0">The heavy stages (frame extraction, COLMAP) run on your own Mac. Install the helper once, then this page drives it:</p>
+    <pre class="cmd">brew install ffmpeg uv
+uvx --from git+https://github.com/danielhkuo/aperture-tilt-shift sa gui</pre>
+    <p class="hint">Keep that terminal open and <button id="retry" style="padding:1px 7px">re-check</button>. Chrome may ask permission to reach a local device. In Safari open <a href="http://127.0.0.1:8549" style="color:var(--accent)">127.0.0.1:8549</a> directly. <a href="https://github.com/danielhkuo/aperture-tilt-shift" style="color:var(--accent)">Source &amp; capture notes</a>.</p>
+  </section>
 </aside>
 
 <main>
+  <div id="conn"></div>
   <div id="bar">
     <button id="v-ref" class="on">Reference</button>
     <button id="v-preview">Preview</button>
@@ -126,7 +156,7 @@
     <button id="cancel" style="display:none">Cancel job</button>
   </div>
   <div id="stage">
-    <div id="empty">Choose a phone video to start.<br><span class="dim">No footage yet? Run <code>sa demo</code> and open the <code>demo</code> folder.</span></div>
+    <div id="empty"></div>
     <div id="wrap" style="display:none"><img id="img" alt=""><canvas id="cv"></canvas></div>
     <div id="busy"></div>
   </div>
@@ -135,25 +165,229 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const api = async (url, body) => {
-  const r = await fetch(url, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.statusText); }
-  return r.json();
-};
+const HELPER = 'http://127.0.0.1:8549';
+let LOCAL = false;          // true when this page is served by the helper itself
 
-let S = null;                 // server state
+// ============================================================ geometry (mirrors sa/geometry.py)
+const M = {
+  mul: (A, B) => { const C = new Array(9).fill(0); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) C[3 * i + j] += A[3 * i + k] * B[3 * k + j]; return C; },
+  mulv: (A, v) => [A[0] * v[0] + A[1] * v[1] + A[2] * v[2], A[3] * v[0] + A[4] * v[1] + A[5] * v[2], A[6] * v[0] + A[7] * v[1] + A[8] * v[2]],
+  T: A => [A[0], A[3], A[6], A[1], A[4], A[7], A[2], A[5], A[8]],
+  inv: A => {
+    const [a, b, c, d, e, f, g, h, i] = A, det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    return [(e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det, (f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det, (d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det];
+  },
+  flat: R => [].concat(...R),
+};
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = a => Math.hypot(...a);
+const sub = (a, b) => a.map((v, i) => v - b[i]);
+
+const ray = (P, u, v) => [(u - P.cx) / P.f, (v - P.cy) / P.f, 1];
+// Plane n·X = d in the reference camera, exactly as geometry.plane_from_tilt builds it.
+function planeOf(P, p) {
+  const t = p.tilt * Math.PI / 180, a = p.azimuth * Math.PI / 180;
+  const n = [Math.sin(t) * Math.sin(a), Math.sin(t) * Math.cos(a), Math.cos(t)];
+  const [u, v] = p.pivot || [P.cx, P.cy];
+  return {n, d: p.dist * dot(n, ray(P, u, v))};
+}
+function tiltFromPlane(P, pl) {
+  const tilt = Math.acos(Math.max(-1, Math.min(1, pl.n[2]))) * 180 / Math.PI;
+  const azimuth = tilt > 1e-9 ? ((Math.atan2(pl.n[0], pl.n[1]) * 180 / Math.PI) + 360) % 360 : 0;
+  return {n: pl.n, d: pl.d, tilt, azimuth, dist: pl.d / dot(pl.n, ray(P, P.cx, P.cy))};
+}
+// Predicted blur diameter, px: b = D f |1/z − 1/z0|.
+const blurAt = (P, u, v, z, pl, aperture) => P.D * aperture * P.f * Math.abs(1 / z - dot(pl.n, ray(P, u, v)) / pl.d);
+
+// ============================================================ backends
+// Remote: the local helper (sa gui) — every call is an HTTP request.
+class Remote {
+  constructor(base) { this.base = base; this.kind = 'helper'; }
+  async json(url, body) {
+    const r = await fetch(this.base + url, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.statusText); }
+    return r.json();
+  }
+  state() { return this.json('/api/state'); }
+  open(path) { return this.json('/api/open', {path}); }
+  browse(kind) { return this.json('/api/browse/' + kind, {}); }
+  run(body) { return this.json('/api/run', body); }
+  cancel() { return this.json('/api/cancel', {}); }
+  log(since) { return this.json('/api/log?since=' + since); }
+  points() { return this.json('/api/points'); }
+  depth(px) { return this.json('/api/depth', {pivot: px}); }
+  plane(body) { return this.json('/api/plane', body); }
+  refUrl(key) { return this.base + '/api/ref.jpg?' + encodeURIComponent(key); }
+  renderUrl(name) { return this.base + '/api/render/' + encodeURI(name) + '?' + Date.now(); }
+  async preview(p) {
+    const q = new URLSearchParams({tilt: p.tilt, azimuth: p.azimuth, dist: p.dist, aperture: p.aperture});
+    if (p.pivot) { q.set('pu', p.pivot[0]); q.set('pv', p.pivot[1]); }
+    const r = await fetch(this.base + '/api/preview.jpg?' + q);
+    if (!r.ok) throw new Error((await r.json()).detail);
+    return r.blob();
+  }
+}
+
+// Demo: an exported scene bundle, rendered in WebGL — the same warp-and-average, on the GPU.
+class Demo {
+  constructor(url) { this.url = url; this.kind = 'demo'; this.lines = []; this.saved = null; }
+  async load(onProgress) {
+    const s = await (await fetch(this.url + '/scene.json')).json();
+    this.s = s;
+    this.P = {width: s.width, height: s.height, f: s.K[0][0], cx: s.K[0][2], cy: s.K[1][2], D: s.D};
+    const imgs = await Promise.all(s.frames.map((f, i) => new Promise((ok, bad) => {
+      const im = new Image(); im.crossOrigin = 'anonymous';
+      im.onload = () => { onProgress && onProgress(i + 1, s.frames.length); ok(im); };
+      im.onerror = () => bad(new Error('failed to load ' + f.file));
+      im.src = this.url + '/' + f.file;
+    })));
+    this.gl = new GLRenderer(s.width, s.height, imgs);
+    this.saved = s.plane;
+    return this;
+  }
+  async state() {
+    const s = this.s, pts = s.points.z;
+    return {project: s.title, video: null, frames: s.frames.length, meta: {transfer: s.transfer}, renders: [], job: null, loading: [0, 0],
+            poses: {width: s.width, height: s.height, f: this.P.f, k: 0, cx: this.P.cx, cy: this.P.cy, registered: s.frames.length,
+                    ref: s.frames[s.ref].file, D: s.D, depths: s.depths}, plane: this.saved};
+  }
+  refUrl() { return this.url + '/' + this.s.frames[this.s.ref].file; }
+  async points() { return this.s.points; }
+  async log(since) { return {lines: this.lines.slice(since), next: this.lines.length, running: false}; }
+  pointAt(px) {  // plane.point_at: median depth of the nearest sparse points, on the pixel's ray
+    const {uv, z} = this.s.points, radius = 0.05 * this.s.width;
+    const near = uv.map((p, i) => [Math.hypot(p[0] - px[0], p[1] - px[1]), i]).sort((a, b) => a[0] - b[0]).slice(0, 5).filter(d => d[0] <= radius);
+    if (!near.length) throw new Error('no reconstructed points near that pixel — click on something textured');
+    const zs = near.map(d => z[d[1]]).sort((a, b) => a - b), med = zs[Math.floor(zs.length / 2)];
+    return ray(this.P, px[0], px[1]).map(c => c * med);
+  }
+  async depth(px) { return {dist: this.pointAt(px)[2]}; }
+  async plane(body) {
+    let pl;
+    if (body.pixels) {
+      const [a, b, c] = body.pixels.map(p => this.pointAt(p)), n0 = cross(sub(b, a), sub(c, a));
+      if (norm(n0) < 1e-9 * norm(sub(b, a)) * norm(sub(c, a))) throw new Error('points are collinear');
+      let n = n0.map(v => v / norm(n0)), d = dot(n, a);
+      if (d < 0) { n = n.map(v => -v); d = -d; }
+      pl = {n, d};
+    } else pl = planeOf(this.P, body);
+    const out = tiltFromPlane(this.P, pl);
+    if (body.save) { this.saved = out; this.lines.push('plane saved (in this browser only)'); }
+    return out;
+  }
+  homographies(p) {  // per frame: ref pixels → frame pixels, in OpenCV index coordinates
+    const s = this.s, K = M.flat(s.K), Ki = M.inv(K), pl = planeOf(this.P, p), Rr = M.flat(s.frames[s.ref].R), tr = s.frames[s.ref].t;
+    const T = [1, 0, 0.5, 0, 1, 0.5, 0, 0, 1], Ti = M.inv(T);
+    const cr = M.mulv(M.T(Rr), tr).map(v => -v);   // reference camera centre
+    const rows = s.frames.map(f => {
+      const R = M.mul(M.flat(f.R), M.T(Rr)), t = sub(f.t, M.mulv(R, tr));
+      const A = R.map((v, i) => v + t[Math.floor(i / 3)] * pl.n[i % 3] / pl.d);
+      return M.mul(Ti, M.mul(M.mul(K, M.mul(A, Ki)), T));
+    });
+    // aperture: keep frames whose centre lies within a·D/2 of the reference, in its image plane
+    const use = s.frames.map(f => {
+      const c = M.mulv(M.T(M.flat(f.R)), f.t).map(v => -v), o = M.mulv(Rr, sub(c, cr));
+      return Math.hypot(o[0], o[1]) <= p.aperture * s.D / 2 + 1e-9;
+    });
+    return {rows, use};
+  }
+  async render(p) { const {rows, use} = this.homographies(p); return this.gl.render(rows, use, this.s.transfer); }
+  async preview(p) { return new Promise(ok => this.render(p).then(c => c.toBlob(ok, 'image/jpeg', 0.9))); }
+  async run(body) {
+    const p = params();
+    if (body.sweep) {
+      const [a, b, step] = body.sweep, tilts = []; for (let t = a; t <= b + step / 2; t += step) tilts.push(t);
+      const panels = [];
+      for (const t of tilts) { const c = await this.render({...p, tilt: t}); const im = new Image(); im.src = c.toDataURL(); await im.decode(); panels.push([t, im]); }
+      const w = 640, h = Math.round(this.s.height * w / this.s.width), out = document.createElement('canvas');
+      out.width = w * panels.length; out.height = h;
+      const ctx = out.getContext('2d'); ctx.font = 'bold 24px sans-serif'; ctx.lineWidth = 5; ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
+      panels.forEach(([t, im], i) => { ctx.drawImage(im, i * w, 0, w, h); ctx.strokeText(t + ' deg', i * w + 14, 34); ctx.fillText(t + ' deg', i * w + 14, 34); });
+      download(out, `sweep_${a}-${b}.png`); this.lines.push(`sweep of ${tilts.length} tilts downloaded`);
+    } else {
+      download(await this.render(p), `tilt${p.tilt.toFixed(0)}_az${p.azimuth.toFixed(0)}_d${p.dist.toPrecision(3)}.png`);
+      this.lines.push('render downloaded');
+    }
+    return {ok: true};
+  }
+}
+const download = (canvas, name) => canvas.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click(); }, 'image/png');
+
+class GLRenderer {
+  constructor(w, h, imgs) {
+    const c = this.canvas = document.createElement('canvas'); c.width = w; c.height = h;
+    const gl = this.gl = c.getContext('webgl2', {preserveDrawingBuffer: true, premultipliedAlpha: false});
+    if (!gl) throw new Error('WebGL2 is not available in this browser');
+    const vs = `#version 300 es
+      void main(){ vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position = vec4(p*2.0-1.0, 0, 1); }`;
+    const fs = `#version 300 es
+      precision highp float; precision highp int; precision highp sampler2DArray;
+      uniform sampler2DArray frames; uniform sampler2D hs; uniform int n; uniform vec2 size; uniform int transfer;
+      out vec4 o;
+      vec3 dec(vec3 v){ if(transfer==2) return v; if(transfer==1) return mix(v*v/3.0, (exp((v-0.55991073)/0.17883277)+0.28466892)/12.0, step(0.5,v));
+                        return mix(v/12.92, pow((v+0.055)/1.055, vec3(2.4)), step(0.04045,v)); }
+      vec3 enc(vec3 v){ if(transfer==2) return v; if(transfer==1) return mix(sqrt(3.0*v), 0.17883277*log(max(12.0*v-0.28466892,1e-12))+0.55991073, step(1.0/12.0,v));
+                        return mix(v*12.92, 1.055*pow(max(v,1e-12), vec3(1.0/2.4))-0.055, step(0.0031308,v)); }
+      void main(){
+        vec3 q = vec3(gl_FragCoord.x - 0.5, size.y - gl_FragCoord.y - 0.5, 1.0);   // OpenCV index coords, y down
+        vec3 acc = vec3(0); float w = 0.0;
+        for (int i = 0; i < 512; i++) {
+          if (i >= n) break;
+          vec4 r0 = texelFetch(hs, ivec2(0,i), 0), r1 = texelFetch(hs, ivec2(1,i), 0), r2 = texelFetch(hs, ivec2(2,i), 0);
+          if (r0.w < 0.5) continue;                                                 // outside the aperture
+          vec3 p = vec3(dot(r0.xyz,q), dot(r1.xyz,q), dot(r2.xyz,q));
+          if (p.z <= 0.0) continue;
+          vec2 s = p.xy / p.z;
+          if (s.x < 0.0 || s.y < 0.0 || s.x > size.x - 1.0 || s.y > size.y - 1.0) continue;
+          acc += dec(texture(frames, vec3((s + 0.5) / size, float(i))).rgb); w += 1.0;
+        }
+        o = vec4(enc(acc / max(w, 1e-6)), 1.0);
+      }`;
+    const prog = this.prog = gl.createProgram();
+    for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+      const sh = gl.createShader(type); gl.shaderSource(sh, src); gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+      gl.attachShader(prog, sh);
+    }
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    this.n = imgs.length;
+    const arr = gl.createTexture(); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, arr);
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, w, h, imgs.length);
+    imgs.forEach((im, i) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, i, w, h, 1, gl.RGBA, gl.UNSIGNED_BYTE, im));
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.hs = gl.createTexture(); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.hs);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.uniform1i(gl.getUniformLocation(prog, 'frames'), 0); gl.uniform1i(gl.getUniformLocation(prog, 'hs'), 1);
+    gl.uniform2f(gl.getUniformLocation(prog, 'size'), w, h); gl.uniform1i(gl.getUniformLocation(prog, 'n'), imgs.length);
+    this.uTransfer = gl.getUniformLocation(prog, 'transfer');
+  }
+  render(rows, use, transfer) {
+    const gl = this.gl, data = new Float32Array(this.n * 12);
+    rows.forEach((H, i) => { for (let r = 0; r < 3; r++) { data.set(H.slice(3 * r, 3 * r + 3), 12 * i + 4 * r); data[12 * i + 4 * r + 3] = use[i] ? 1 : 0; } });
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.hs);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 3, this.n, 0, gl.RGBA, gl.FLOAT, data);
+    gl.uniform1i(this.uTransfer, {srgb: 0, hlg: 1, linear: 2}[transfer] || 0);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    return this.canvas;
+  }
+}
+
+// ============================================================ UI
+let B = null;                 // active backend
+let S = null;                 // its state
 let pts = null;               // {uv, z} sparse points in the reference view
-let view = 'ref';             // ref | preview | render
-let mode = 'focus';           // focus | three
-let clicks = [];              // pixels collected in three-point mode
-let pivot = null;             // [u, v] full-res pixel, or null for the image centre
-let renderName = null;
+let view = 'ref', mode = 'focus', clicks = [], pivot = null, renderName = null;
 let logNext = 0, wasRunning = false, previewBusy = false, previewDirty = false, loadedFor = null;
+let helper = null, demos = [];
 
 const say = msg => { $('log').textContent += msg + '\n'; $('log').scrollTop = 1e9; };
 const busy = msg => { $('busy').style.display = msg ? 'block' : 'none'; $('busy').textContent = msg || ''; };
 
-// --- plane parameters -------------------------------------------------------
 const distRange = () => { const d = S.poses.depths || [0.5, 1, 2]; return [d[0] / 2, d[2] * 2]; };
 const getDist = () => { const [lo, hi] = distRange(); return lo * Math.pow(hi / lo, $('dist').value / 1000); };
 const setDist = v => { const [lo, hi] = distRange(); $('dist').value = Math.max(0, Math.min(1000, 1000 * Math.log(v / lo) / Math.log(hi / lo))); };
@@ -161,37 +395,19 @@ const params = () => ({tilt: +$('tilt').value, azimuth: +$('azimuth').value, dis
 
 function showParams() {
   const p = params();
-  $('o-tilt').textContent = p.tilt.toFixed(1) + '°';
-  $('o-azimuth').textContent = p.azimuth.toFixed(0) + '°';
-  $('o-dist').textContent = p.dist.toPrecision(3);
-  $('o-aperture').textContent = Math.round(p.aperture * 100) + '%';
+  $('o-tilt').textContent = p.tilt.toFixed(1) + '°'; $('o-azimuth').textContent = p.azimuth.toFixed(0) + '°';
+  $('o-dist').textContent = p.dist.toPrecision(3); $('o-aperture').textContent = Math.round(p.aperture * 100) + '%';
 }
 
-// Plane n·X = d in the reference camera, exactly as geometry.plane_from_tilt builds it.
-function planeOf(p) {
-  const P = S.poses, t = p.tilt * Math.PI / 180, a = p.azimuth * Math.PI / 180;
-  const n = [Math.sin(t) * Math.sin(a), Math.sin(t) * Math.cos(a), Math.cos(t)];
-  const [u, v] = p.pivot || [P.cx, P.cy];
-  const ray = [(u - P.cx) / P.f, (v - P.cy) / P.f, 1];
-  return {n, d: p.dist * (n[0] * ray[0] + n[1] * ray[1] + n[2])};
-}
-// Predicted blur diameter, px at full resolution: b = D f |1/z − 1/z0|.
-function blurAt(u, v, z, pl, aperture) {
-  const P = S.poses, nr = pl.n[0] * (u - P.cx) / P.f + pl.n[1] * (v - P.cy) / P.f + pl.n[2];
-  return P.D * aperture * P.f * Math.abs(1 / z - nr / pl.d);
-}
-
-// --- drawing ----------------------------------------------------------------
 function draw() {
   const cv = $('cv'), img = $('img');
   if (!S || !S.poses || !img.clientWidth) return;
   const dpr = window.devicePixelRatio || 1;
   cv.width = img.clientWidth * dpr; cv.height = img.clientHeight * dpr;
-  const ctx = cv.getContext('2d'), k = cv.width / S.poses.width, p = params(), pl = planeOf(p);
+  const ctx = cv.getContext('2d'), k = cv.width / S.poses.width, p = params(), pl = planeOf(S.poses, p);
   if ($('overlay').checked && pts && view !== 'render') {
     for (let i = 0; i < pts.uv.length; i++) {
-      const [u, v] = pts.uv[i], b = blurAt(u, v, pts.z[i], pl, p.aperture);
-      const s = Math.min(b / 12, 1);  // 0 = in focus
+      const [u, v] = pts.uv[i], b = blurAt(S.poses, u, v, pts.z[i], pl, p.aperture), s = Math.min(b / 12, 1);
       ctx.fillStyle = b < 2 ? 'rgba(95,255,140,.95)' : `rgba(255,${Math.round(190 - 130 * s)},80,${.55 - .3 * s})`;
       const r = (b < 2 ? 2.2 : 1.4) * dpr;
       ctx.fillRect(u * k - r / 2, v * k - r / 2, r, r);
@@ -209,9 +425,9 @@ function draw() {
 function setView(v) {
   view = v;
   for (const name of ['ref', 'preview', 'render']) $('v-' + name).classList.toggle('on', name === v);
-  if (v === 'ref') $('img').src = '/api/ref.jpg?' + loadedFor;
+  if (v === 'ref') $('img').src = B.refUrl(loadedFor);
   if (v === 'preview') requestPreview();
-  if (v === 'render' && renderName) $('img').src = '/api/render/' + encodeURI(renderName) + '?' + Date.now();
+  if (v === 'render' && renderName) $('img').src = B.renderUrl(renderName);
   draw();
 }
 
@@ -219,13 +435,10 @@ async function requestPreview() {
   if (!S || !S.poses) return;
   if (previewBusy) { previewDirty = true; return; }
   previewBusy = true; busy('rendering preview…');
-  const p = params(), q = new URLSearchParams({tilt: p.tilt, azimuth: p.azimuth, dist: p.dist, aperture: p.aperture});
-  if (p.pivot) { q.set('pu', p.pivot[0]); q.set('pv', p.pivot[1]); }
   try {
-    const r = await fetch('/api/preview.jpg?' + q);
-    if (!r.ok) throw new Error((await r.json()).detail);
-    const url = URL.createObjectURL(await r.blob());
-    if (view === 'preview') { const old = $('img').src; $('img').src = url; if (old.startsWith('blob:')) URL.revokeObjectURL(old); }
+    const t0 = performance.now(), blob = await B.preview(params());
+    if (view === 'preview') { const old = $('img').src; $('img').src = URL.createObjectURL(blob); if (old.startsWith('blob:')) URL.revokeObjectURL(old); }
+    $('st-render').innerHTML = `<span class="dim">preview ${(performance.now() - t0).toFixed(0)} ms</span>`;
   } catch (e) { say('preview: ' + e.message); }
   previewBusy = false; busy('');
   if (previewDirty) { previewDirty = false; requestPreview(); }
@@ -233,10 +446,13 @@ async function requestPreview() {
 
 function changed() { showParams(); draw(); if (view !== 'preview') setView('preview'); else requestPreview(); }
 
-// --- state ------------------------------------------------------------------
 function apply(state) {
   S = state;
-  const has = !!S.project, frames = S.frames || 0, posed = !!S.poses, running = !!(S.job && S.job.running);
+  const demo = B.kind === 'demo', has = !!S.project, frames = S.frames || 0, posed = !!S.poses, running = !!(S.job && S.job.running);
+  $('sec-scene').classList.toggle('hidden', !demo);
+  $('sec-project').classList.toggle('hidden', demo);
+  $('sec-ingest').classList.toggle('hidden', demo); $('sec-pose').classList.toggle('hidden', demo);
+  $('row-scale').style.display = demo ? 'none' : 'contents';
   $('project-path').textContent = has ? S.project : 'No project open.';
   $('sec-ingest').classList.toggle('off', !has || !S.video);
   $('sec-pose').classList.toggle('off', !frames);
@@ -247,7 +463,8 @@ function apply(state) {
   $('st-plane').innerHTML = S.plane ? `<span class="ok">saved · ${S.plane.tilt.toFixed(0)}° @ ${S.plane.dist.toPrecision(3)}</span>` : '';
   if (posed) $('pose-info').textContent = `f = ${S.poses.f.toFixed(0)} px · sweep D = ${S.poses.D.toPrecision(3)} · scene depth ≈ ${S.poses.depths ? S.poses.depths[1].toPrecision(3) : '?'}`;
   for (const id of ['run-ingest', 'run-pose', 'run-render', 'run-sweep']) $(id).disabled = running;
-  $('run-render').disabled = $('run-sweep').disabled = running || !S.plane;
+  $('run-render').disabled = $('run-sweep').disabled = running || (!demo && !S.plane);
+  $('run-render').textContent = demo ? 'Render & download' : 'Render';
   $('cancel').style.display = running ? '' : 'none';
   $('renders').innerHTML = '';
   (S.renders || []).slice(0, 12).forEach(name => {
@@ -257,9 +474,10 @@ function apply(state) {
   });
   $('empty').style.display = posed ? 'none' : '';
   $('wrap').style.display = posed ? '' : 'none';
-  if (!posed) $('empty').innerHTML = !has ? $('empty').innerHTML : frames ? 'Frames extracted. Solve the camera pose next.' : 'Extract frames to begin.';
+  if (!posed) $('empty').innerHTML = !has ? 'Choose a phone video to start.<br><span class="dim">No footage yet? Run <code>sa demo</code> and open the <code>demo</code> folder.</span>' : frames ? 'Frames extracted. Solve the camera pose next.' : 'Extract frames to begin.';
+  if (demo && !S.plane) $('st-plane').innerHTML = '';
 
-  const key = posed ? S.project + '|' + S.poses.ref + '|' + S.poses.registered + '|' + S.poses.f : null;
+  const key = posed ? B.kind + '|' + S.project + '|' + S.poses.ref + '|' + S.poses.registered + '|' + S.poses.f : null;
   if (key && key !== loadedFor) loadScene(key);
   if (!key) { loadedFor = null; pts = null; }
 }
@@ -267,50 +485,102 @@ function apply(state) {
 async function loadScene(key) {
   loadedFor = key; pivot = null; clicks = [];
   busy('loading frames…');
-  const ticker = setInterval(async () => { const s = await api('/api/state'); busy(`loading frames… ${s.loading[0]}/${s.loading[1]}`); }, 700);
+  const ticker = B.kind === 'helper' ? setInterval(async () => { const s = await B.state(); busy(`loading frames… ${s.loading[0]}/${s.loading[1]}`); }, 700) : null;
   try {
-    pts = await api('/api/points');
+    pts = await B.points();
     if (S.plane) { $('tilt').value = S.plane.tilt; $('azimuth').value = S.plane.azimuth; setDist(S.plane.dist); }
-    else setDist(S.poses.depths ? S.poses.depths[1] : 1);
+    else { $('tilt').value = 0; $('azimuth').value = 0; setDist(S.poses.depths ? S.poses.depths[1] : 1); }
     showParams();
     await new Promise(done => { $('img').onload = done; $('img').onerror = done; setView('ref'); });
   } catch (e) { say('error: ' + e.message); }
-  clearInterval(ticker); busy(''); $('img').onload = draw; draw();
+  if (ticker) clearInterval(ticker); busy(''); $('img').onload = draw; draw();
 }
 
-const refresh = async () => apply(await api('/api/state'));
+const refresh = async () => apply(await B.state());
 
 async function poll() {
-  try {
-    const l = await api('/api/log?since=' + logNext);
-    l.lines.forEach(say); logNext = l.next;
-    if (l.running !== wasRunning) {
-      const finished = wasRunning && !l.running; wasRunning = l.running;
-      await refresh();
-      if (finished && S.job && S.job.name === 'render' && S.job.returncode === 0 && S.renders.length) {
-        renderName = S.renders.find(n => n.endsWith('strip.png') && S.renders.indexOf(n) < 2) || S.renders[0];
-        setView('render');
+  if (B && B.kind === 'helper') {
+    try {
+      const l = await B.log(logNext);
+      l.lines.forEach(say); logNext = l.next;
+      if (l.running !== wasRunning) {
+        const finished = wasRunning && !l.running; wasRunning = l.running;
+        await refresh();
+        if (finished && S.job && S.job.name === 'render' && S.job.returncode === 0 && S.renders.length) {
+          renderName = S.renders.find(n => n.endsWith('strip.png') && S.renders.indexOf(n) < 2) || S.renders[0];
+          setView('render');
+        }
       }
-    }
-  } catch (e) { /* server restarting */ }
+    } catch (e) { setConn(null); }
+  }
   setTimeout(poll, wasRunning ? 500 : 1500);
 }
 
 async function run(body) {
-  try { await api('/api/run', body); logNext = 0; $('log').textContent = ''; wasRunning = false; await refresh(); }
-  catch (e) { say('error: ' + e.message); }
+  try {
+    await B.run(body);
+    if (B.kind === 'helper') { logNext = 0; $('log').textContent = ''; wasRunning = false; }
+    await refresh();
+    if (B.kind === 'demo') { const l = await B.log(logNext); l.lines.forEach(say); logNext = l.next; }
+  } catch (e) { say('error: ' + e.message); }
 }
 
-// --- events -----------------------------------------------------------------
-$('pick-video').onclick = async () => { const s = await api('/api/browse/video', {}); if (s.project) apply(s); };
-$('pick-folder').onclick = async () => { const s = await api('/api/browse/folder', {}); if (s.project) apply(s); };
-$('path').onkeydown = async e => { if (e.key !== 'Enter') return; try { apply(await api('/api/open', {path: e.target.value.trim()})); } catch (err) { say('error: ' + err.message); } };
+// ---- connection / mode -----------------------------------------------------
+function setConn(h) {
+  helper = h;
+  const demoBtn = demos.length ? ` <button id="use-demo">Demo scenes</button>` : '';
+  if (h) $('conn').innerHTML = `<span class="ok">● Local helper connected</span> <span class="dim">v${h.version}${LOCAL ? '' : ' at 127.0.0.1:8549'}</span>` +
+      (B && B.kind === 'demo' ? ` <button id="use-helper">Use it</button>` : '') + (B && B.kind === 'helper' ? demoBtn : '');
+  else $('conn').innerHTML = `<span class="warn">○ No local helper</span> <span class="dim">— you can play with the demo scenes; to process your own video, install the helper (left, bottom)</span> <button id="retry2">re-check</button>`;
+  if ($('use-helper')) $('use-helper').onclick = () => useBackend(new Remote(LOCAL ? '' : HELPER));
+  if ($('use-demo')) $('use-demo').onclick = () => useDemo($('scene').value || demos[0].path);
+  if ($('retry2')) $('retry2').onclick = detect;
+}
+
+async function hello(base) {
+  const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 2500);
+  const h = await (await fetch(base + '/api/hello', {signal: ctrl.signal})).json();
+  if (h.app !== 'sa') throw new Error('not the helper');
+  return h;
+}
+
+async function detect() {
+  let h = null;
+  try { h = await hello(''); LOCAL = true; } catch (e) {            // served by the helper (any port)
+    try { h = await hello(HELPER); LOCAL = false; } catch (e2) {}   // hosted page, helper on its default port
+  }
+  $('sec-install').classList.toggle('hidden', !!h);
+  setConn(h);
+  if (h) { if (!B || B.kind !== 'helper') await useBackend(new Remote(LOCAL ? '' : HELPER)); }
+  else if (!B && demos.length) await useDemo(demos[0].path);
+}
+
+async function useBackend(b) {
+  B = b; loadedFor = null; pts = null; renderName = null; $('log').textContent = ''; logNext = 0;
+  try { await refresh(); } catch (e) { say('error: ' + e.message); }
+  setConn(helper);
+}
+
+async function useDemo(path) {
+  busy('loading scene…');
+  try {
+    const d = await new Demo(path).load((i, n) => busy(`loading frames… ${i}/${n}`));
+    await useBackend(d);
+  } catch (e) { busy(''); say('demo: ' + e.message); $('empty').textContent = 'Could not load the demo scene: ' + e.message; }
+}
+
+// ---- events ----------------------------------------------------------------
+$('pick-video').onclick = async () => { const s = await B.browse('video'); if (s.project) apply(s); };
+$('pick-folder').onclick = async () => { const s = await B.browse('folder'); if (s.project) apply(s); };
+$('path').onkeydown = async e => { if (e.key !== 'Enter') return; try { apply(await B.open(e.target.value.trim())); } catch (err) { say('error: ' + err.message); } };
 $('run-ingest').onclick = () => run({stage: 'ingest', every: +$('every').value});
 $('run-pose').onclick = () => run({stage: 'pose'});
 const renderBody = () => ({stage: 'render', scale: +$('scale').value, aperture: +$('aperture').value, median: $('median').checked});
 $('run-render').onclick = () => run(renderBody());
 $('run-sweep').onclick = () => run({...renderBody(), sweep: [+$('sw0').value, +$('sw1').value, +$('sw2').value], name: 'sweep'});
-$('cancel').onclick = () => api('/api/cancel', {});
+$('cancel').onclick = () => B.cancel();
+$('retry').onclick = detect;
+$('scene').onchange = e => useDemo(e.target.value);
 for (const id of ['tilt', 'azimuth', 'dist', 'aperture']) $(id).oninput = changed;
 $('overlay').onchange = draw;
 $('v-ref').onclick = () => setView('ref'); $('v-preview').onclick = () => setView('preview'); $('v-render').onclick = () => setView('render');
@@ -318,7 +588,7 @@ $('reset-pivot').onclick = () => { pivot = null; changed(); };
 $('mode-focus').onclick = () => { mode = 'focus'; clicks = []; $('mode-focus').classList.add('on'); $('mode-three').classList.remove('on'); draw(); };
 $('mode-three').onclick = () => { mode = 'three'; clicks = []; $('mode-three').classList.add('on'); $('mode-focus').classList.remove('on'); setView('ref'); };
 $('save-plane').onclick = async () => {
-  try { const p = params(); await api('/api/plane', {tilt: p.tilt, azimuth: p.azimuth, dist: p.dist, pivot: p.pivot, save: true}); say('plane saved'); await refresh(); }
+  try { const p = params(); await B.plane({tilt: p.tilt, azimuth: p.azimuth, dist: p.dist, pivot: p.pivot, save: true}); say('plane saved'); await refresh(); }
   catch (e) { say('error: ' + e.message); }
 };
 
@@ -329,12 +599,12 @@ $('cv').onclick = async e => {
   const px = toPixel(e);
   try {
     if (mode === 'focus') {
-      const {dist} = await api('/api/depth', {pivot: px});
+      const {dist} = await B.depth(px);
       pivot = px; setDist(dist); changed();
     } else {
       clicks.push(px); draw();
       if (clicks.length === 3) {
-        const pl = await api('/api/plane', {pixels: clicks, save: false});
+        const pl = await B.plane({pixels: clicks, save: false});
         clicks = []; pivot = null;
         $('tilt').value = pl.tilt; $('azimuth').value = pl.azimuth; setDist(pl.dist);
         say(`plane through 3 points: tilt ${pl.tilt.toFixed(1)}°, azimuth ${pl.azimuth.toFixed(0)}°, distance ${pl.dist.toPrecision(3)}`);
@@ -350,12 +620,19 @@ $('cv').onmousemove = e => {
   let best = -1, bd = reach;
   for (let i = 0; i < pts.uv.length; i++) { const d = (pts.uv[i][0] - u) ** 2 + (pts.uv[i][1] - v) ** 2; if (d < bd) { bd = d; best = i; } }
   if (best < 0) { $('readout').textContent = ''; return; }
-  const p = params(), b = blurAt(pts.uv[best][0], pts.uv[best][1], pts.z[best], planeOf(p), p.aperture);
+  const p = params(), b = blurAt(S.poses, pts.uv[best][0], pts.uv[best][1], pts.z[best], planeOf(S.poses, p), p.aperture);
   $('readout').textContent = `depth ${pts.z[best].toPrecision(3)} · predicted blur ${b.toFixed(1)} px`;
 };
 window.onresize = draw;
 
-refresh().then(poll);
+// ---- boot ------------------------------------------------------------------
+(async () => {
+  try { const r = await fetch('scenes/index.json'); demos = r.ok ? await r.json() : []; } catch (e) { demos = []; }
+  if (!Array.isArray(demos)) demos = [];
+  demos.forEach(d => { const o = document.createElement('option'); o.value = d.path; o.textContent = d.title; $('scene').appendChild(o); });
+  await detect();
+  poll();
+})();
 </script>
 </body>
 </html>

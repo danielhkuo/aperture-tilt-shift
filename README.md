@@ -7,6 +7,21 @@ the chosen plane induces, `H = K (R + t nᵀ/d) K⁻¹`, and averaged in linear 
 Needs `ffmpeg` (`brew install ffmpeg`) and [uv](https://docs.astral.sh/uv/).
 COLMAP comes from the `pycolmap` wheel; nothing else to install.
 
+## Online demo
+
+**https://aperture-tilt-shift.vercel.app** — pre-solved scenes rendered live in
+WebGL (the same warp-and-average, on the GPU). To process your own video from
+that page, run the local helper; the page finds it on `127.0.0.1:8549`:
+
+```bash
+brew install ffmpeg uv
+uvx --from git+https://github.com/danielhkuo/aperture-tilt-shift sa gui
+```
+
+The heavy stages (frame extraction, COLMAP) never leave your machine. Add a
+scene to the online demo with `sa export <project> --out web/scenes/<name>`
+and redeploy (`vercel deploy --prod`).
+
 ## GUI
 
 ```bash
@@ -35,6 +50,7 @@ sa plane   street/ --tilt 40 --dist 12       # numeric: reaches planes with noth
 sa render  street/ --out street.png
 sa render  street/ --tilt 0:60:10 --out sweep   # 7 renders + strip.png, one pass over the frames
 sa shiftadd street/ --patch 1800,900,200,200    # M1: template-matched shift-and-add, no pose
+sa export  street/ --out web/scenes/street       # bundle for the in-browser renderer
 ```
 
 `render` options: `--aperture 0.5` (stop down: use the inner half of the sweep),

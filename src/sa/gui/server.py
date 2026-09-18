@@ -16,8 +16,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+
+from sa import __version__
 
 from sa import geometry as g
 from sa import plane as plane_mod
@@ -25,6 +28,8 @@ from sa import render
 from sa.poses import Poses
 from sa.project import VIDEO_SUFFIXES, Project
 
+HOSTED_ORIGIN = "https://aperture-tilt-shift.vercel.app"
+ORIGIN_REGEX = r"https://aperture-tilt-shift(-[a-z0-9-]+)?\.vercel\.app|https?://(localhost|127\.0\.0\.1)(:\d+)?"
 PREVIEW_WIDTH = 960
 PREVIEW_FRAMES = 64
 OVERLAY_POINTS = 4000
@@ -134,10 +139,19 @@ def _jpeg(img: np.ndarray, quality: int = 88) -> Response:
     return Response(buf.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
-def create_app(initial: str | None = None) -> FastAPI:
+def create_app(initial: str | None = None, extra_origins: list[str] = ()) -> FastAPI:
     app, state = FastAPI(title="sa"), State()
     if initial:
         state.open(Path(initial))
+
+    # The hosted page (Vercel) drives this local helper cross-origin; browsers
+    # additionally require the private-network header before touching loopback.
+    app.add_middleware(CORSMiddleware, allow_origins=list(extra_origins), allow_origin_regex=ORIGIN_REGEX,
+                       allow_methods=["*"], allow_headers=["*"], allow_private_network=True)
+
+    @app.get("/api/hello")
+    def hello():
+        return {"app": "sa", "version": __version__, "project": str(state.project.root) if state.project else None}
 
     @app.get("/")
     def index():
@@ -288,11 +302,12 @@ def create_app(initial: str | None = None) -> FastAPI:
     return app
 
 
-def serve(initial: str | None = None, port: int = 8549, open_browser: bool = True) -> None:
+def serve(initial: str | None = None, port: int = 8549, open_browser: bool = True,
+          extra_origins: list[str] = ()) -> None:
     import uvicorn
 
     url = f"http://127.0.0.1:{port}"
-    print(f"sa gui → {url}")
+    print(f"sa gui → {url}   (or open {HOSTED_ORIGIN}, which will find this helper)")
     if open_browser:
         threading.Timer(0.8, webbrowser.open, [url]).start()
-    uvicorn.run(create_app(initial), host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run(create_app(initial, extra_origins), host="127.0.0.1", port=port, log_level="warning")

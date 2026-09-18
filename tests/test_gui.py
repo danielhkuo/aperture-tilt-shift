@@ -68,3 +68,28 @@ def test_bad_requests(client):
     assert client.post("/api/plane", json={"pixels": [[1, 1], [2, 2]]}).status_code == 422
     assert client.post("/api/run", json={"stage": "render"}).status_code == 400  # no plane saved yet
     assert client.get("/api/render/../poses.json").status_code == 404
+
+
+def test_hosted_page_may_drive_the_helper(client):
+    preflight = {"Origin": "https://aperture-tilt-shift.vercel.app", "Access-Control-Request-Method": "POST",
+                 "Access-Control-Request-Headers": "content-type", "Access-Control-Request-Private-Network": "true"}
+    r = client.options("/api/state", headers=preflight)
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] == preflight["Origin"]
+    assert r.headers["access-control-allow-private-network"] == "true"
+    assert client.options("/api/state", headers={**preflight, "Origin": "https://evil.example"}).status_code == 400
+    assert client.get("/api/hello").json()["app"] == "sa"
+
+
+def test_export_writes_a_scene_bundle(client, tmp_path):
+    import json
+
+    from sa.export import export
+    from sa.project import Project
+
+    out = export(Project(tmp_path), tmp_path / "bundle", width=320, max_frames=10, log=lambda *_: None)
+    scene = json.loads((out / "scene.json").read_text())
+    assert scene["width"] == 320 and len(scene["frames"]) == 10
+    assert scene["frames"][scene["ref"]]["file"] == "frames/0024.jpg"  # the reference view made the cut
+    assert (out / "frames" / "0024.jpg").exists()
+    assert scene["K"][0][0] == pytest.approx(250.0)  # 500 px focal length at half scale

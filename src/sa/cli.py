@@ -133,10 +133,20 @@ def cmd_demo(a):
     print(f"next: sa ingest {path} --project {a.project} --every 1 && sa pose {a.project} && sa gui {a.project}")
 
 
+def cmd_export(a):
+    from sa.export import export
+    from sa.project import Project
+
+    project = Project(a.project)
+    if not project.poses_path.exists():
+        sys.exit(f"{project.poses_path} not found — run: sa pose {a.project}")
+    export(project, a.out, width=a.width, max_frames=a.max_frames, title=a.title)
+
+
 def cmd_gui(a):
     from sa.gui.server import serve
 
-    serve(a.project, port=a.port, open_browser=not a.no_browser)
+    serve(a.project, port=a.port, open_browser=not a.no_browser, extra_origins=a.allow_origin)
 
 
 def main(argv=None) -> None:
@@ -191,10 +201,19 @@ def main(argv=None) -> None:
     s.add_argument("project", nargs="?", default="demo")
     s.set_defaults(fn=cmd_demo)
 
+    s = sub.add_parser("export", help="scene bundle for the in-browser (WebGL) renderer")
+    s.add_argument("project")
+    s.add_argument("--out", required=True, help="bundle folder, e.g. web/scenes/street")
+    s.add_argument("--width", type=int, default=960)
+    s.add_argument("--max-frames", type=int, default=60)
+    s.add_argument("--title")
+    s.set_defaults(fn=cmd_export)
+
     s = sub.add_parser("gui", help="open the browser GUI")
     s.add_argument("project", nargs="?", help="project folder or video")
     s.add_argument("--port", type=int, default=8549)
     s.add_argument("--no-browser", action="store_true")
+    s.add_argument("--allow-origin", action="append", default=[], help="extra web origin allowed to drive this helper")
     s.set_defaults(fn=cmd_gui)
 
     a = p.parse_args(argv)

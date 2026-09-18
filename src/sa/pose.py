@@ -23,6 +23,7 @@ def _small_baseline_options():
 
     o = pycolmap.IncrementalPipelineOptions()
     o.multiple_models = False
+    o.random_seed = 0
     o.mapper.init_min_tri_angle = 2.0  # COLMAP halves this again if it has to
     o.mapper.filter_min_tri_angle = 0.2
     o.mapper.ba_local_min_tri_angle = 1.0
