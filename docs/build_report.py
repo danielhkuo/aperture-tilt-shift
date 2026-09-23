@@ -95,6 +95,9 @@ def parse(md: str):
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             if not all(re.fullmatch(r"-+", c) for c in cells):
                 rows.append(cells)
+        elif re.match(r"\d+\. ", line):
+            flush()
+            story.append(Paragraph(inline(line), ParagraphStyle("li", parent=BODY, leftIndent=18, firstLineIndent=-18)))
         elif line.startswith("    "):
             flush()
             story.append(Paragraph(inline(line.strip()), EQ))
