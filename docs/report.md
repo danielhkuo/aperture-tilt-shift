@@ -4,33 +4,31 @@ ELEC 549 project report · Daniel Kuo · 23 September 2026
 
 ## 1. Creative goal
 
-I wanted one photograph of a real place whose plane of focus is *tilted through the scene*, taken with nothing but an iPhone. A tilt-shift lens can do this and it is what gives the miniature, model-village look; a phone lens cannot, and app filters only paint a blur band across the picture. The goal was the real optical effect: every object blurred by its true distance from a plane chosen after the fact.
-
-The final image looks down at an angle from an upper floor of O'Connor into the two-storey lobby. The focus plane lies along the upper floor, so the lounge furniture is sharp while the study table one floor below, the stairs and the column beside the camera fall away from the plane and blur. No blur filter was applied.
+I wanted to replicate tilt-shift photography with a video from an iPhone. I wanted to get the miniature, model-village look and app filters only paint a blur band across the picture. The goal was the real optical effect: every object blurred by its true distance.
 
 ![Figure 1. Final image: the O'Connor lobby from an upper floor. Focus plane tilted 26° off the lens axis; average of 169 aligned video frames.](report/final.jpg)
 
 ## 2. How it works
 
-**A big lens is an average of many small views.** Light enters a lens at every point across its opening, and each point sees the scene from a slightly different position. The sensor adds all of those views together. An object at the focus distance looks the same from every point of the opening, so the views agree and it stays sharp. An object nearer or farther is seen from slightly different angles, the views disagree about where it is, and the sum smears it out. That smear is defocus blur, and it grows with the size of the opening. A phone lens is a few millimetres across, so its views barely disagree and almost nothing blurs.
+**A lens is an averaging machine.** Light enters a lens at every point across its opening. Each point sees the scene from a slightly different position, and the sensor adds all of these views together. An object at the focus distance looks the same from every point of the opening, so the views agree and it stays sharp. An object nearer or farther is seen from different angles, the views disagree about where it is, and the sum smears it. That smear is defocus blur, and it grows with the size of the opening. A phone lens is a few millimetres wide, so its views almost agree and almost nothing blurs.
 
-**A video sweep is a big lens taken one view at a time.** If I move the phone across a disc about an arm's reach wide while recording, each frame is the view from one point of a lens that size. Adding the frames together gives the image that lens would have made. This is Marc Levoy's synthetic aperture idea, and a 0.5 m opening is a hundred times wider than any real lens, which is why the blur becomes strong enough to look like a miniature.
+**A video sweep is a large lens, one view at a time.** I move the phone across a disc about an arm's reach wide while it records. Each frame is the view from one point of a lens that size. Adding the frames together gives the image that lens would make. A 0.5 m opening is a hundred times wider than any real lens, which is why the blur becomes strong enough to look like a miniature.
 
-**Aligning the frames is what sets the focus.** Before adding, the frames have to be shifted so that some chosen part of the scene lands in the same place in every one. Whatever is aligned comes out sharp; everything else comes out blurred. The simplest version, which I built first, aligns on one small patch by template matching and shifts each whole frame by that amount. That focuses on the depth of the patch, the way SynthCam focuses on the object the user taps.
+**Aligning the frames sets the focus.** Before adding, the frames must be shifted so that one chosen part of the scene lands in the same place in every frame. Whatever is aligned comes out sharp. Everything else comes out blurred.
 
-**Why the blur is real.** Moving the camera sideways by t makes a point at distance z shift in the image by about f·t/z pixels (f is the focal length in pixels). Near things shift a lot, far things a little: that is parallax. If every frame is shifted back by the amount that suits depth z~0~, points at z~0~ land exactly on top of each other, but a point at another depth z is still off by f·t·|1/z − 1/z~0~|. Over the whole sweep, t ranges across the disc of diameter D, so that point is spread over
+**The blur is real parallax.** When the camera moves sideways by t, a point at distance z moves in the image by about f·t/z pixels, where f is the focal length in pixels. Near points move a lot, far points a little. If every frame is shifted back by the amount that suits distance z~0~, points at z~0~ land on top of each other, but a point at another distance z is still off by f·t·|1/z − 1/z~0~|. Across the whole sweep, t covers a disc of diameter D, so that point is spread over
 
     b = D · f · |1/z − 1/z~0~|  pixels.
 
-This is the circle-of-confusion formula for a real lens with D in place of the aperture diameter. No depth map is estimated and no blur filter is applied; the blur is the frames disagreeing, by exactly the amount their parallax disagrees.
+This is the circle-of-confusion formula of a real lens, with D in place of the aperture diameter. No depth map is estimated and no blur filter is applied. The blur is simply the frames disagreeing, by exactly the amount their parallax disagrees.
 
-**Tilting the plane.** A single shift per frame can only focus on one depth, and the sharp region is then a slab facing the camera, like an ordinary lens. To focus on a tilted plane, every pixel needs a different correction, because the plane is at a different depth at every pixel. It turns out that for any flat plane, the whole per-pixel correction from the reference view to frame i is one 3×3 matrix, a homography:
+**Tilting the plane.** One shift per frame can only align one distance, so the sharp region is a slab facing the camera, like an ordinary lens. A tilted plane is at a different distance at every pixel, so every pixel needs its own correction. For a flat plane, all of these corrections together are one 3×3 matrix, a homography:
 
     H = K (R + t n^T^ / d) K^-1^
 
-Reading it from right to left: K^-1^ turns a pixel of the reference frame into a ray in space; R turns that ray by however much the phone rotated between the two frames; t n^T^/d adds the parallax, which is proportional to the translation t and inversely proportional to how far along that ray the plane lies, which is what the plane's normal n and distance d encode; and K turns the result back into a pixel of frame i. Warping frame i by H puts every point of the plane back where the reference view saw it, and the plane comes out sharp after averaging.
+Read from right to left: K^-1^ turns a pixel of the reference frame into a ray in space. R turns the ray by the amount the phone rotated between the two frames. t n^T^/d adds the parallax, which grows with the translation t and shrinks with the distance to the plane along that ray; the normal n and distance d describe the plane. K turns the result back into a pixel of the other frame. Warping each frame by its H puts every point of the plane back where the reference frame saw it, so the plane comes out sharp after averaging.
 
-The important thing is what H does *not* depend on: the pictures. It is built only from the camera motion, the lens, and the numbers (n, d) that describe the plane. So the plane can be anywhere: tilted, cutting through empty air, running along a floor with no texture to track. Tilting the focus plane is just choosing a different n. The phone does not know it did this; one recording gives every plane.
+**Why this reaches planes a lens cannot.** H does not depend on the pictures. It is built only from the camera motion, the lens, and the numbers (n, d) that describe the plane. So the plane can be anywhere: tilted, passing through empty air, or lying along a floor with no texture to track. Changing the tilt is changing n. One recording gives every plane.
 
 ## 3. Capture
 
