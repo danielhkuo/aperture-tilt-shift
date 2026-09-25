@@ -1,77 +1,100 @@
-# sa — synthetic aperture tilt-shift
+<p align="center">
+  <img src="assets/logo.svg" width="96" alt="">
+</p>
 
-Turn a handheld phone video into one photo focused on an arbitrary, possibly
-tilted, plane. The blur is real parallax: frames are warped by the homography
-the chosen plane induces, `H = K (R + t nᵀ/d) K⁻¹`, and averaged in linear light.
+<h1 align="center">Synthetic Aperture Tilt-Shift</h1>
 
-Needs `ffmpeg` (`brew install ffmpeg`) and [uv](https://docs.astral.sh/uv/).
-COLMAP comes from the `pycolmap` wheel; nothing else to install.
+<p align="center">
+  A handheld phone video becomes a lens the size of your arm span.<br>
+  Choose the focus plane, tilted any way you like, after the shot.
+</p>
 
-## Online demo
+<p align="center">
+  <a href="https://aperture-tilt-shift.vercel.app"><b>Live demo</b></a> ·
+  <a href="docs/report.pdf">Write-up</a>
+</p>
 
-**https://aperture-tilt-shift.vercel.app** — pre-solved scenes rendered live in
-WebGL (the same warp-and-average, on the GPU). To process your own video from
-that page, run the local helper; the page finds it on `127.0.0.1:8549`:
+![Before and after: a plain video frame of the O'Connor lobby, and the same scene rendered with the focus plane laid along the upper floor](assets/hero.jpg)
 
-```bash
+A real lens averages the views from every point across its aperture. Objects
+on the focus plane agree in all of those views and stay sharp; everything
+else disagrees and blurs. A phone aperture is a few millimetres wide, so
+nothing blurs. If you instead move the phone across a disc while it records
+video, each frame is one view from one point of a much larger aperture, and
+averaging the aligned frames gives the photograph that lens would have taken.
+
+The alignment is what chooses the focus. Two views of any plane are related
+by a homography that depends only on the camera motion, the intrinsics and the
+plane itself:
+
+```
+H = K (R + t nᵀ / d) K⁻¹
+```
+
+Nothing in it requires the plane to be visible or textured. Pick a normal and
+a distance, warp every frame, average, and that plane is sharp. Tilt it, and
+the sharp band cuts diagonally through the scene, which is the one thing a
+phone lens can never do. The blur is real parallax, not a filter: a point at
+depth *z* smears over `D · f · |1/z − 1/z₀|` pixels, the circle-of-confusion
+formula with the sweep diameter standing in for the aperture.
+
+![The Commons dining hall from one video, rendered with two different focus planes](assets/commons.jpg)
+
+## Using it
+
+You need [ffmpeg](https://ffmpeg.org) and [uv](https://docs.astral.sh/uv/).
+COLMAP is bundled in the `pycolmap` wheel; there is nothing else to install.
+
+```
 brew install ffmpeg uv
 uvx --from git+https://github.com/danielhkuo/aperture-tilt-shift sa gui
 ```
 
-The heavy stages (frame extraction, COLMAP) never leave your machine. Add a
-scene to the online demo with `sa export <project> --out web/scenes/<name>`
-and redeploy (`vercel deploy --prod`).
+That opens the GUI in your browser. Choose a video, extract frames, solve the
+camera poses, then click where you want focus and drag the tilt slider. A
+low-resolution preview updates in about a tenth of a second; a full 4K render
+takes a few seconds.
 
-## GUI
+The same page is hosted at [aperture-tilt-shift.vercel.app](https://aperture-tilt-shift.vercel.app).
+Without the helper running it shows pre-solved scenes, rendered in WebGL on
+your own GPU. With the helper running on your Mac, the hosted page drives it
+and processes your own footage.
 
-```bash
-uv run sa gui
-```
-
-Choose a video → **Extract** → **Solve** → click the image to focus (or click
-three points to lay the plane through them), drag tilt / azimuth / distance /
-aperture with a live preview → **Save plane** → **Render** or **Sweep**.
-Green dots are reconstructed points predicted to be in focus (< 2 px blur);
-hover any dot for its depth and predicted blur `D·f·|1/z − 1/z₀|`.
-
-No footage yet:
-
-```bash
-uv run sa demo demo && uv run sa ingest demo/video.mp4 --project demo --every 1 && uv run sa pose demo && uv run sa gui demo
-```
-
-## CLI
+Each stage is also a command:
 
 ```
-sa ingest  street.MOV --every 8              # → street/frames/*.png
-sa pose    street/                           # → poses.json (K, R, t, sparse cloud)
-sa plane   street/ --pick                    # click 3+ points   (or --points u,v u,v u,v)
-sa plane   street/ --tilt 40 --dist 12       # numeric: reaches planes with nothing to click
-sa render  street/ --out street.png
-sa render  street/ --tilt 0:60:10 --out sweep   # 7 renders + strip.png, one pass over the frames
-sa shiftadd street/ --patch 1800,900,200,200    # M1: template-matched shift-and-add, no pose
-sa export  street/ --out web/scenes/street       # bundle for the in-browser renderer
+sa ingest  clip.MOV --every 5              # video → frames/
+sa pose    clip/                           # COLMAP → poses.json
+sa plane   clip/ --tilt 30 --dist 300      # or --pick to click three points
+sa render  clip/ --aperture 0.8            # warp + average → renders/
+sa render  clip/ --tilt 0:60:10            # a sweep, one pass over the frames
+sa export  clip/ --out web/scenes/clip     # bundle for the browser renderer
 ```
 
-`render` options: `--aperture 0.5` (stop down: use the inner half of the sweep),
-`--scale 0.5`, `--median` (drops moving subjects), `--pivot u,v`,
-`--keep-outliers` (exposure-outlier frames are dropped by default).
-Every stage appends its parameters to `run.json`.
+## Shooting
 
-## Tests
+- 4K, 1× lens, focus and exposure locked, HDR video off.
+- Keep the phone pointed at the same spot and *move* it: spiral outward from
+  the centre over 10–20 seconds, as wide as you can reach. The path you trace
+  is the aperture shape.
+- The scene needs depth. Looking down from a height at things two, five and
+  fifteen metres away works; a wall seen head-on does not blur at all.
+- Static subjects. Anyone who walks through the shot averages into a ghost.
 
-```bash
+## How it is built
+
+`src/sa` is a small Python package: `ingest` (ffmpeg), `pose` (pycolmap,
+retuned for the tiny baselines of a hand sweep), `plane`, `render` (linear
+light, float accumulation, per-pixel weights), and a FastAPI GUI. `sa export`
+writes a scene bundle that `web/` renders in a WebGL shader, which is what the
+hosted demo uses. The geometry is tested against synthetic scenes with known
+poses; see [docs/design.md](docs/design.md) for conventions and
+[docs/report.pdf](docs/report.pdf) for the write-up.
+
+```
 uv run pytest
 ```
 
-Geometry and rendering are tested against dots rendered by point projection
-(independent of the homography code): blur diameter matches
-`D·f·|1/z − 1/z₀|` to 6 %, tilted planes come out sharp, shift-and-add agrees
-with the pose-derived warp (M3). `test_pipeline.py` runs video → COLMAP →
-render on a synthetic scene. Conventions and decisions: [docs/design.md](docs/design.md).
-
-## Capture notes
-
-Lock focus and exposure, 1× lens, HDR video off, Enhanced Stabilization off
-(stabilisation crops move the principal point frame to frame). Spiral out from
-the centre over 10–20 s; translate, don't pan.
+Built for ELEC 549 at Rice University. The synthetic-aperture idea follows
+Marc Levoy's SynthCam; camera poses come from
+[COLMAP](https://colmap.github.io).

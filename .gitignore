@@ -7,3 +7,8 @@ __pycache__/
 *.mov
 *.mp4
 web/dist/
+.vercel/
+texput.log
+docs/*.aux
+docs/*.log
+docs/*.out

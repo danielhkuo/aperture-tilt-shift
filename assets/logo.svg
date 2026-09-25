@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <clipPath id="c"><circle cx="64" cy="64" r="44"/></clipPath>
+    <filter id="b" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="3.2"/></filter>
+  </defs>
+  <circle cx="64" cy="64" r="52" fill="none" stroke="#2f7fd6" stroke-width="7"/>
+  <g clip-path="url(#c)" transform="rotate(-22 64 64)" fill="#2f7fd6">
+    <rect x="0" y="26" width="128" height="12" opacity=".35" filter="url(#b)"/>
+    <rect x="0" y="58" width="128" height="12"/>
+    <rect x="0" y="90" width="128" height="12" opacity=".35" filter="url(#b)"/>
+  </g>
+</svg>
