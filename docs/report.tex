@@ -22,55 +22,51 @@
 \maketitle
 
 \section{Creative goal}
-I wanted to replicate tilt-shift photography with a video from an iPhone. I wanted to get the miniature, model-village look and app filters only paint a blur band across the picture. The goal was the real optical effect: every object blurred by its true distance.
+This project was made with the goal of reproducing tilt-shift photography with only an iPhone. From my understanding, tilt-shift photography creates a miniature appearance by tricking the eye with a very shallow depth of field. I hypothesized that this effect could be replicated with a video shot on iPhone.
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{report/final.jpg}
-\caption{Final image: the O'Connor lobby from an upper floor. Focus plane tilted 26$^\circ$ off the lens axis; average of 169 aligned video frames.}
+\caption{The O'Connor lobby, seen from an upper floor. The focus plane is tilted $26^\circ$ from the optical axis, and the image is the mean of 169 registered frames.}
 \label{fig:1}
 \end{figure}
 
 \section{How it works}
-\textbf{A lens is an averaging machine.} Light enters a lens at every point across its opening. Each point sees the scene from a slightly different position, and the sensor adds all of these views together. An object at the focus distance looks the same from every point of the opening, so it stays sharp. An object nearer or farther is seen from different angles, the views disagree about where it is, and the sum smears it. That smear is defocus blur, and it grows with the size of the opening. A phone lens is a few millimetres wide, so its views almost agree and almost nothing blurs.
+In a normal DSLR, light rays enter and the lens essentially adds all these rays up into a visible image. The limiting factor here is the aperture, which sets how wide a range of positions the rays from each object can enter through. When you have an object at the focal distance, it appears sharp because all the rays ``agree'' and center at the same place. On the other hand, objects that are farther and closer have many rays that project to different locations on the focal plane which causes blur. When the aperture is larger, the blur gets larger because the rays from said objects come from a wider spread of positions, so they disagree more.
 
-\textbf{A video sweep is a large lens, one view at a time.} I move the phone across a disc about an arm's reach wide while it records. Each frame is the view from one point of a lens that size. Adding the frames together gives the image that lens would make. A 0.5 m opening is a hundred times wider than any real lens, which is why the blur becomes strong enough to look like a miniature.
+Now a phone doesn't have a big lens, and as a result, not a big aperture. As a result of this, it's impossible to get that depth of field type view. So we can manufacture it. When you record a video with the phone, you can kind of simulate a large aperture by taking in rays from objects at many different perspectives. When I recorded my videos for this project, I would start in the center, and then film in a swirling motion, spiralling outward until I was making large circles with the phone at an arm's length.
 
-\textbf{Aligning the frames sets the focus.} Before adding, the frames must be shifted so that one chosen part of the scene lands in the same place in every frame. Whatever is aligned comes out sharp. Everything else comes out blurred.
+In post processing, you want to layer your images such that the object you want to focus stays clear. Because we moved in a swirling motion, the objects that aren't focused will naturally blur.
 
-\textbf{The blur is real parallax.} When the camera moves sideways by t, a point at distance z moves in the image by about $f\,t/z$ pixels, where f is the focal length in pixels. Near points move a lot, far points a little. If every frame is shifted back by the amount that suits distance $z_0$, points at $z_0$ land on top of each other, but a point at another distance z is still off by $f\,t\,|1/z - 1/z_0|$. Across the whole sweep, t covers a disc of diameter D, so that point is spread over
-
+More specifically, the blur comes from uncorrected parallax, and it behaves just like a lens's ``circle of confusion''. When the camera moves sideways by $t$ (as it does during the swirling recording), the image of a point at depth $z$ shifts by about $f\,t/z$ pixels, where $f$ is the focal length in pixels. The key intuition here is that nearby points shift more than distant ones. If the frames are aligned so that points at the focus depth $z_0$ overlap, a point at some other depth $z$ is left with a residual displacement $f\,t\,|1/z - 1/z_0|$. The translations in the spiral sweep fill a disc of diameter $D$, so the residual traces a disc of diameter
 \begin{equation*}
 b = D \, f \, \left| \frac{1}{z} - \frac{1}{z_0} \right| \quad \text{pixels.}
 \end{equation*}
-This is the circle-of-confusion formula of a real lens, with D in place of the aperture diameter. No depth map is estimated and no blur filter is applied. The blur is simply the frames disagreeing, by exactly the amount their parallax disagrees.
+Which is the circle-of-confusion formula for a lens, with the sweep diameter $D$ replacing the aperture diameter. To be clear, this is a simplified version.
 
-\textbf{Tilting the plane.} One shift per frame can only align one distance, so the sharp region is a slab facing the camera, like an ordinary lens. A tilted plane is at a different distance at every pixel, so every pixel needs its own correction. For a flat plane, all of these corrections together are one $3\times 3$ matrix, a homography:
-
+The next thing that we do is do something called ``plane-induced homography''. This is how we do the tilt-shift effect. We warp each frame in a very particular way, shifting and stretching it by a different amount at every pixel, so that we cancel parallax for every point on one plane. That plane then comes out in focus, even though its points are at many different depths.
 \begin{equation*}
 H = K \left( R + \frac{t\, n^{\mathsf T}}{d} \right) K^{-1}
 \end{equation*}
-Read from right to left: $K^{-1}$ turns a pixel of the reference frame into a ray in space. R turns the ray by the amount the phone rotated between the two frames. $t\,n^{\mathsf T}/d$ adds the parallax, which grows with the translation t and shrinks with the distance to the plane along that ray; the normal n and distance d describe the plane. K turns the result back into a pixel of the other frame. Warping each frame by its H puts every point of the plane back where the reference frame saw it, so the plane comes out sharp after averaging.
-
+Acting on a pixel, the product is applied from the right. $K^{-1}$ sends a pixel of the reference frame out along a ray. $R$ rotates that ray by the phone's rotation between the two frames. The term $t\,n^{\mathsf T}/d$ contributes the parallax of the plane: it increases with the translation $t$ and decreases with distance to the plane along the ray. The unit normal $n$ and the offset $d$ specify the plane. $K$ maps the corrected ray back to a pixel in the frame being warped. After every frame is warped by its own $H$, each point of the plane sits where the reference frame recorded it, and the average is sharp across that plane.
 
 \section{Capture}
-The lobby was filmed from the upper-floor balcony with an iPhone at 4K, 24 fps, on the 1$\times$ lens, for about 45 seconds. During the take the phone was moved across a disc roughly an arm's reach wide, spiralling out from the centre, while kept pointed at the same spot in the lobby. Only the phone's position matters; small rotations are corrected by the alignment later. Every fifth frame was extracted, giving 213 frames spread over the disc.
+I shot the photo of O'Connor from a balcony on the 2nd or 3rd floor. Used my iPhone 13 Pro with the Blackmagic Cam app at 4k, 24\,fps and with the $1\times$ lens. Then I filmed for 45 seconds in the spiral motion that I mentioned previously, trying to keep the lens pointed in the same direction.
 
-The scene was chosen on purpose: looking steeply down from a height at furniture on two floors, with a column very close to the camera, gives depths from a couple of metres to about fifteen in one frame. That depth range is what the effect needs (Section 7).
-
+I chose this viewpoint because this is generally how you ought to shoot for the miniature effect. Definitely could have gotten a better shot, but it's hard to find places with elevation on campus. Additionally, the best miniature shots usually are taken of moving cars, trains, and trucks which would not be possible given the video nature of this technique.
 
 \section{Technical steps}
-You can do this by hand. Nothing in this method needs a computer to be understood, because a version of it can be done in Photoshop. Extract a few dozen frames from the video and load them as layers. Pick the thing you want sharp, say the green sofa, and nudge every layer until its sofa sits exactly on top of the sofa in the first layer. Then set the stack to average the layers (Stack Mode $\rightarrow$ Mean, or give layer \emph{k} an opacity of 1/\emph{k}). The sofa, which now agrees in every layer, comes out sharp; the table on the floor below, which every layer put in a slightly different place, comes out as a soft smear.
+You can do this by hand in Photoshop. Load a few dozen frames from the video as layers, then decide which surface should be sharp, the green sofa for example. Translate every layer until that sofa coincides with the sofa in the first layer so that they are stacked. Then average the stack, either with Stack Mode $\rightarrow$ Mean or by giving layer $k$ opacity $1/k$. The sofa is now in the same place on every layer! Note how the table on the floor below is not: each layer laid it down somewhere slightly different, and the mean effect turns the cumulative offsets into a soft smear.
 
-Tilting the plane is the same idea with a different tool. Nudging a layer is a shift, and a shift can only line up things at one depth, so the sharp region is a slab facing the camera, like an ordinary lens. To line up a whole tilted plane, use Free Transform $\rightarrow$ Distort instead: pick four points lying on the plane you want sharp, for instance four corners of the floor tiles, and drag the corners of each layer until those four points land on their positions in the first layer. A four-corner distortion is exactly a homography, so this lines up every point of that plane at once, near and far, and averaging the stack gives an image focused on the tilted plane. It is only tedious: four points on each of two hundred layers.
+Again, this is the simple version with no tilt-shift. The sharp region stays a slab facing the camera. If you want a tilted plane of focus, it's a bit more difficult. With Free Transform $\rightarrow$ Distort, mark four points that lie on the desired plane, four corners of the floor tiles for instance, and pull the corners of each layer until those points sit on their counterparts in the first layer. And that's it, a four-corner distort is a homography. Averaging the registered stack yields an image focused on that tilted plane. Of course, this manual route is impractical since it requires four point correspondences on roughly two hundred layers of images.
 
-It also shows where doing it by eye stops working. You can only drag a layer onto something you can see. A plane that passes through the empty middle of the atrium, or along a blank white wall, has nothing at the focus distance to line up on. In those places the correct distortion still exists, it just cannot be found by looking at the pictures.
+Working by eye also fails where the focus surface has no texture, like air. A plane that passes through the air of the atrium, or that lies on a featureless white wall, has no detail at the focus distance to lock onto.
 
-I wrote a tool that automates those steps. It pulls every fifth frame out of the video, then works out where the phone was for each frame: COLMAP finds thousands of small features in every frame, matches them between neighbours, and solves, like a surveyor triangulating from many vantage points, for each camera's position and orientation, the lens's focal length, and the 3D position of the matched features. The plane is then described as numbers rather than four dragged points: I click where I want focus, which reads the depth there from the triangulated features, and set the tilt with sliders while a preview updates.
+Instead, I wrote a program that automates both stages from camera geometry rather than from dragged points. Every fifth frame is extracted. COLMAP finds thousands of local features in each frame, matches them across neighbouring frames, and triangulates the matches to recover each camera's position and orientation, the focal length, and a 3D location for every matched feature. The plane is then specified by parameters. Clicking a pixel samples the depth of the nearby triangulated points, and sliders set the tilt while the preview is updated.
 
 
 \section{The final image in numbers}
-Structure-from-motion recovers shape but not absolute scale, so distances are in arbitrary units; the blur in pixels only depends on the ratio D/z.
+Structure-from-motion recovers shape and leaves absolute scale undetermined, so the distances below are in the reconstruction's arbitrary units. Pixel blur depends only on the ratio $D/z$, and the unknown scale cancels in that ratio.
 
 \begin{center}\small
 \begin{tabular}{p{0.28\linewidth}p{0.66\linewidth}}
@@ -78,44 +74,45 @@ Structure-from-motion recovers shape but not absolute scale, so distances are in
 \textbf{Quantity} & \textbf{Value} \\
 \midrule
 Frames & 213 extracted, 213 registered by COLMAP, 169 used (aperture 0.8) \\
-Intrinsics & f = 2658 px, radial distortion k = 0.015, reprojection error 1.27 px \\
+Intrinsics & $f = 2658$ px, radial distortion $k = 0.015$, reprojection error 1.27 px \\
 Sweep diameter & 10.4 units for the full sweep, 7.8 for the frames used \\
 Scene depth & 230--640 units (5th--95th percentile of the sparse points) \\
-Focus plane & tilt 26$^\circ$, azimuth 351$^\circ$, depth 284 at the pivot (upper floor by the sofa) \\
+Focus plane & tilt $26^\circ$, azimuth $351^\circ$, depth 284 at the pivot (upper floor by the sofa) \\
 \bottomrule
 \end{tabular}
 \end{center}
-Predicted blur b = $D\,f\,|1/z - 1/z_0|$ at a few points: 0 px at the pivot, 1 px at the top of the stairs, 10 px at the reception desk, 33 px at the table on the lower floor (at 4K resolution).
+Evaluating $b = D\,f\,|1/z - 1/z_0|$ at 4K resolution gives 0\,px at the pivot, 1\,px at the top of the stairs, 10\,px at the reception desk, and 33\,px at the table on the lower floor.
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{report/crops.jpg}
-\caption{Full-resolution crops, reference frame left and render right. Top: the lower-floor table (predicted 33 px) is smeared into a soft disc. Bottom: the sofa on the focus plane stays sharp; a person who walked past during the sweep survives as a translucent ghost.}
+\caption{Full-resolution crops, with the reference frame on the left and the render on the right. Above, the lower-floor table (predicted blur 33\,px) spreads into a soft disc. Below, the sofa, which lies on the focus plane, stays sharp, while a person who crossed the frame during the sweep is left as a faint transparent figure.}
 \label{fig:2}
 \end{figure}
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{report/commons.jpg}
-\caption{A second scene, the Commons dining hall, from one video and two planes. Left: tilted 38.5$^\circ$ along the floor, so tables near and far are sharp while the banners in front and the courtyard beyond blur. Right: tilted 63.5$^\circ$ the other way; the sharp band now runs across the mezzanine and the floor is out of focus.}
+\caption{The Commons dining hall, one video refocused on two planes. Left: tilt $38.5^\circ$ along the floor, so near and far tables are sharp while the banners in front and the courtyard beyond are blurred. Right: tilt $63.5^\circ$ in the opposite sense; the sharp region crosses the mezzanine and the floor is defocused.}
 \label{fig:3}
 \end{figure}
 
 \section{Validation}
-Before trusting real footage I rendered a synthetic city (a textured ground plane seen from above, with upright buildings) from known camera positions and ran the full pipeline on the encoded video. COLMAP recovered f = 1001 px against a true 1000 and registered all 60 frames; clicking three ground points gave a plane tilted 54.8$^\circ$ against the true 55$^\circ$. A second test renders dots at known depths by direct projection, sharing no code with the homography, and measures their rendered width: it matches $D\,f\,|1/z - 1/z_0|$ within 6 \%, and a template-matched shift-and-add of the same frames agrees with the pose-derived warp to within one grey level.
+The pipeline was checked on rendered imagery before it was applied to the lobby footage. A synthetic city, a textured ground plane viewed from above with upright buildings, was rendered from known camera poses, encoded as a video, and run through the full pipeline. COLMAP recovered $f = 1001$\,px against a true focal length of 1000\,px and registered all 60 frames. Three clicked points on the ground gave a plane at $54.8^\circ$, against a true tilt of $55^\circ$. A second test places dots at known depths by direct projection, in code independent of the homography, and measures the width of each rendered dot. The measured widths agree with $D\,f\,|1/z - 1/z_0|$ to within 6\%. A template-matched shift-and-add of the same frames matches the pose-derived warp to within one grey level.
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{report/demo_strip.jpg}
-\caption{Tilt sweep of the synthetic scene from one capture, 0$^\circ$ to 60$^\circ$, rendered in one pass over the frames.}
+\caption{One synthetic capture refocused at tilts from $0^\circ$ to $60^\circ$, each plane formed in a single pass over the frames.}
 \label{fig:4}
 \end{figure}
 
 \section{What I learned}
-\textbf{The scene decides whether the effect exists at all.} The blur at a point is $D\,f\,|1/z - 1/z_0|$: it comes from the \emph{difference} between that point's depth and the focus depth, scaled by how big the sweep is compared with the distance. A scene where everything is at nearly the same depth, like a wall seen head-on or a city skyline, produces almost no blur no matter how the plane is set, because the frames agree about everything. I tried to capture 30-60-90 from the O'Connor roof, some 50 m away, and it came out almost uniformly sharp for exactly this reason. The O'Connor lobby works because from the balcony there are objects at two metres (the column), at five (the upper-floor furniture) and at fifteen (the study table below), all in one frame. Even so, the predicted 33 px of blur on the lower floor is visible but modest; the miniature look would be stronger with a wider sweep or a nearer subject. Looking down from a height at small objects, the classic tilt-shift viewpoint, is the right choice for optical reasons, not only for the look.
+\label{sec:learned}
+The quality of the miniature effect is really decided by how much the depth varies across the scene from your shooting position. This was made clear when I tried to take a picture from the roof of O'Connor. I was far from 30-60-90, and the result was sharp over almost the whole frame, which definitely wasn't what I wanted. The circle-of-confusion formula accounts for it: blur equals $D\,f\,|1/z - 1/z_0|$, so it follows the gap between a point's depth and the focus depth, scaled by the sweep diameter relative to distance. A wall seen head-on, or a skyline, has almost no such gap. The frames agree about every object, and no setting of the plane produces blur. The lobby is the contrasting case. One frame contains a column right next to the camera, the furniture on the upper floor, and the study table below, which is about twice as far away as the sofa. With that range the predicted 33\,px on the lower floor is clearly visible, and it is still a restrained amount of defocus. Lengthening the sweep, or bringing the subject closer, would increase it. An elevated camera looking down on small objects, the familiar tilt-shift vantage, follows from this scaling. The miniature look is a consequence of the geometry.
 
-\textbf{Moving people do not blur, they ghost.} A real lens takes all of its views at the same instant, so a person is at one place in every view and simply blurs if they are off the plane. My aperture is assembled over 45 seconds. Someone who walks through is at a different place in each frame, and in most frames not there at all, so the average contains a faint, transparent copy of them at each position they occupied (Figure~\ref{fig:2}, bottom right, and the diners in Figure~\ref{fig:3}).
+Because this is video, a moving person appears as multiple copies, not as a defocused blur. This is because a physical lens integrates every viewpoint at one instant, so a person occupies a single place in all of them and blurs only by being off the plane. The synthetic aperture here is accumulated over 45 seconds. Someone walking through the shot is in a new place in each frame, and absent from most frames, and the average therefore holds a faint transparent image at each place they occupied (Figure~\ref{fig:2}, bottom right, and the diners in Figure~\ref{fig:3}).
 
-\textbf{Focus became a decision made after the shot.} A camera normally fixes the focus at the moment of capture, and the focus plane is always the one the lens is built to give: flat and facing the camera. Here the recording stores only views. Which plane is sharp, how far it is tilted, and how wide the aperture is are all chosen afterwards, and the choice is not limited to what the pictures show, because the warp is computed from where the camera was, not from what it saw. The plane can lie along the upper floor at 26$^\circ$, or pass through the open air of the atrium, and one 45-second clip gives all of them. The cost of this freedom is that everything rests on recovering the camera positions accurately: an error in a frame's position softens the very plane that should be sharp, which is why the final image uses only the inner 80 \% of the sweep, where the positions were most reliable.
+This method allows us to decide what to focus on in the photo after the fact. A conventional exposure fixes focus when the shutter fires, and the sharp locus is always the flat plane the lens forms, perpendicular to its axis. This clip retains only the viewpoints. The plane brought into focus, its tilt, and the portion of the sweep treated as the aperture are parameters of the average, chosen later. Each warp is built from the camera's recovered position, so the plane is not limited to surfaces that appear in the frames. Following the upper floor at $26^\circ$ is one setting; a plane that crosses the empty atrium is another. Both, and any plane between them, come out of the same 45-second clip. What that latitude requires is accurate poses. Place one frame wrongly and the homography misses, spreading the surface it was meant to hold in focus. Figure~\ref{fig:1} uses only the inner 80\% of the sweep.
 
 
 \end{document}
